@@ -196,3 +196,66 @@ fn build_loads_local_modules_for_import_validation() {
     let _ = fs::remove_file(out);
     let _ = fs::remove_dir(dir);
 }
+
+#[test]
+fn run_loads_nested_local_modules_for_import_validation() {
+    let exe = env!("CARGO_BIN_EXE_muc");
+    let dir = unique_temp_dir("run_nested_imports");
+    let nested = dir.join("nested");
+    fs::create_dir_all(&nested).expect("nested temp dir should be created");
+    let dep = nested.join("dep.mu");
+    let main = dir.join("main.mu");
+    fs::write(&dep, "@dep.mod{E[v];V v:i32=1;}").expect("dep source should be written");
+    fs::write(&main, "@main.app{:d=dep.mod;F main:()->i32=0;}").expect("main source should be written");
+
+    let output = Command::new(exe)
+        .args(["run", main.to_str().expect("temp path should be valid utf8")])
+        .output()
+        .expect("binary should run");
+
+    assert!(
+        output.status.success(),
+        "run should load nested local modules for import validation: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let _ = fs::remove_file(dep);
+    let _ = fs::remove_file(main);
+    let _ = fs::remove_dir(nested);
+    let _ = fs::remove_dir(dir);
+}
+
+#[test]
+fn build_loads_nested_local_modules_for_import_validation() {
+    let exe = env!("CARGO_BIN_EXE_muc");
+    let dir = unique_temp_dir("build_nested_imports");
+    let nested = dir.join("nested");
+    fs::create_dir_all(&nested).expect("nested temp dir should be created");
+    let dep = nested.join("dep.mu");
+    let main = dir.join("main.mu");
+    let out = dir.join("main.mub");
+    fs::write(&dep, "@dep.mod{E[v];V v:i32=1;}").expect("dep source should be written");
+    fs::write(&main, "@main.app{:d=dep.mod;F main:()->i32=0;}").expect("main source should be written");
+
+    let output = Command::new(exe)
+        .args([
+            "build",
+            main.to_str().expect("temp path should be valid utf8"),
+            "-o",
+            out.to_str().expect("temp path should be valid utf8"),
+        ])
+        .output()
+        .expect("binary should run");
+
+    assert!(
+        output.status.success(),
+        "build should load nested local modules for import validation: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let _ = fs::remove_file(dep);
+    let _ = fs::remove_file(main);
+    let _ = fs::remove_file(out);
+    let _ = fs::remove_dir(nested);
+    let _ = fs::remove_dir(dir);
+}

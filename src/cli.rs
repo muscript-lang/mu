@@ -164,7 +164,8 @@ fn load_entry_workspace(entry_file: &Path) -> Result<Vec<(PathBuf, String, Progr
     let mut loaded = vec![(entry_file.to_path_buf(), entry_src, entry_program)];
 
     let root = entry_file.parent().unwrap_or_else(|| Path::new("."));
-    let candidate_files = collect_sibling_mu_files(root)?
+    let candidate_files = collect_local_mu_files(root)
+        .into_iter()
         .filter(|path| !same_path(path, entry_file))
         .collect::<Vec<_>>();
     let mut candidates = Vec::new();
@@ -214,20 +215,29 @@ fn load_programs(files: Vec<PathBuf>) -> Result<Vec<(PathBuf, String, Program)>,
     Ok(loaded)
 }
 
-fn collect_sibling_mu_files(root: &Path) -> Result<impl Iterator<Item = PathBuf>, String> {
+fn collect_local_mu_files(root: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
-    let entries = fs::read_dir(root).map_err(|e| format!("walk error: {e}"))?;
-    for entry in entries {
-        let Ok(entry) = entry else {
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
             continue;
         };
-        let path = entry.path();
-        if path.is_file() && path.extension().and_then(|ext| ext.to_str()) == Some("mu") {
-            files.push(path);
+        for entry in entries {
+            let Ok(entry) = entry else {
+                continue;
+            };
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if path.extension().and_then(|ext| ext.to_str()) == Some("mu") {
+                files.push(path);
+            }
         }
     }
     files.sort();
-    Ok(files.into_iter())
+    files
 }
 
 fn check_loaded_modules(loaded: &[(PathBuf, String, Program)]) -> Result<(), String> {
