@@ -244,11 +244,14 @@ impl Parser {
 
     fn parse_type_params(&mut self) -> Result<Vec<Ident>, ParseError> {
         self.expect_simple(TokenKind::LBracket, "expected `[` for type parameters")?;
-        let params = if self.at_simple(TokenKind::RBracket) {
-            Vec::new()
-        } else {
-            self.parse_ident_list()?
-        };
+        if self.at_simple(TokenKind::RBracket) {
+            return Err(ParseError {
+                code: ParseErrorCode::ExpectedIdent,
+                span: self.peek().span,
+                message: "expected type parameter identifier".to_string(),
+            });
+        }
+        let params = self.parse_ident_list()?;
         self.expect_simple(TokenKind::RBracket, "expected `]` after type parameters")?;
         Ok(params)
     }

@@ -21,3 +21,19 @@ fn parse_invalid_expression_reports_stable_code() {
     assert_eq!(err.code, ParseErrorCode::ExpectedExpr);
     assert_eq!(err.code.as_str(), "E2005");
 }
+
+#[test]
+fn parse_rejects_empty_type_param_list_in_type_decl() {
+    let err = parse_str("@m{T Box[]=Box(i32);}")
+        .expect_err("empty type param list should fail");
+    assert_eq!(err.code, ParseErrorCode::ExpectedIdent);
+    assert_eq!(err.code.as_str(), "E2003");
+}
+
+#[test]
+fn parse_rejects_empty_type_param_list_in_function_decl() {
+    let err = parse_str("@m{F id[]:(i32)->i32=arg0;}")
+        .expect_err("empty function type param list should fail");
+    assert_eq!(err.code, ParseErrorCode::ExpectedIdent);
+    assert_eq!(err.code.as_str(), "E2003");
+}
