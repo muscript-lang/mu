@@ -98,3 +98,11 @@ fn bytecode_runs_ctor_match_with_wildcard_field() {
     let bc = compile(&program).expect("program should lower to bytecode");
     run_bytecode(&bc, &[]).expect("ADT wildcard field pattern should run");
 }
+
+#[test]
+fn bytecode_runs_user_defined_function_call() {
+    let src = "@x.fn{F id:(i32)->i32=arg0;F main:()->i32=c(id,0);}";
+    let program = parse_str(src).expect("program should parse");
+    let bc = compile(&program).expect("program should lower to bytecode");
+    run_bytecode(&bc, &[]).expect("user function call should run");
+}

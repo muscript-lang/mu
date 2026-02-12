@@ -3,6 +3,12 @@ use std::io::Read;
 
 use crate::bytecode::{MAGIC, OpCode};
 
+#[derive(Debug, Clone)]
+struct FunctionBlob {
+    arity: u8,
+    code: Vec<u8>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum Value {
     Int(i64),
@@ -10,6 +16,13 @@ enum Value {
     String(String),
     Adt { tag: String, fields: Vec<Value> },
     Unit,
+}
+
+#[derive(Debug)]
+struct Frame {
+    fn_id: usize,
+    ip: usize,
+    locals: Vec<Value>,
 }
 
 #[derive(Debug)]
@@ -26,54 +39,49 @@ impl fmt::Display for VmError {
 impl std::error::Error for VmError {}
 
 pub fn run_bytecode(bytecode: &[u8], _args: &[String]) -> Result<(), VmError> {
-    let mut cursor = 0usize;
-    if bytecode.len() < 4 || &bytecode[0..4] != MAGIC {
+    let (strings, functions, entry_fn) = decode(bytecode)?;
+    let entry_idx = entry_fn as usize;
+    if entry_idx >= functions.len() {
         return Err(VmError {
-            message: "invalid bytecode header".to_string(),
+            message: "entry function index out of bounds".to_string(),
         });
     }
-    cursor += 4;
-    let nstrings = read_u32(bytecode, &mut cursor)? as usize;
-    let mut strings = Vec::with_capacity(nstrings);
-    for _ in 0..nstrings {
-        let len = read_u32(bytecode, &mut cursor)? as usize;
-        if cursor + len > bytecode.len() {
+    if functions[entry_idx].arity != 0 {
+        return Err(VmError {
+            message: "main function must have arity 0".to_string(),
+        });
+    }
+
+    let mut stack: Vec<Value> = Vec::new();
+    let mut frames = vec![Frame {
+        fn_id: entry_idx,
+        ip: 0,
+        locals: Vec::new(),
+    }];
+
+    while !frames.is_empty() {
+        let frame = frames.last_mut().expect("checked non-empty");
+        let func = &functions[frame.fn_id];
+        let code = &func.code;
+        if frame.ip >= code.len() {
             return Err(VmError {
-                message: "corrupt bytecode string table".to_string(),
+                message: "program terminated without RET".to_string(),
             });
         }
-        let s = std::str::from_utf8(&bytecode[cursor..cursor + len]).map_err(|_| VmError {
-            message: "bytecode string table contains invalid utf-8".to_string(),
-        })?;
-        strings.push(s.to_string());
-        cursor += len;
-    }
-    let code_len = read_u32(bytecode, &mut cursor)? as usize;
-    if cursor + code_len != bytecode.len() {
-        return Err(VmError {
-            message: "corrupt bytecode code section length".to_string(),
-        });
-    }
-    let code = &bytecode[cursor..];
 
-    let mut ip = 0usize;
-    let mut stack: Vec<Value> = Vec::new();
-    let mut locals: Vec<Value> = Vec::new();
-
-    while ip < code.len() {
-        let op = code[ip];
-        ip += 1;
+        let op = code[frame.ip];
+        frame.ip += 1;
         match op {
             x if x == OpCode::PushInt as u8 => {
-                let v = read_i64(code, &mut ip)?;
+                let v = read_i64(code, &mut frame.ip)?;
                 stack.push(Value::Int(v));
             }
             x if x == OpCode::PushBool as u8 => {
-                let b = read_u8(code, &mut ip)? != 0;
+                let b = read_u8(code, &mut frame.ip)? != 0;
                 stack.push(Value::Bool(b));
             }
             x if x == OpCode::PushString as u8 => {
-                let idx = read_u32(code, &mut ip)? as usize;
+                let idx = read_u32(code, &mut frame.ip)? as usize;
                 let s = strings.get(idx).ok_or_else(|| VmError {
                     message: "string index out of bounds".to_string(),
                 })?;
@@ -81,21 +89,21 @@ pub fn run_bytecode(bytecode: &[u8], _args: &[String]) -> Result<(), VmError> {
             }
             x if x == OpCode::PushUnit as u8 => stack.push(Value::Unit),
             x if x == OpCode::LoadLocal as u8 => {
-                let idx = read_u32(code, &mut ip)? as usize;
-                let v = locals.get(idx).ok_or_else(|| VmError {
+                let idx = read_u32(code, &mut frame.ip)? as usize;
+                let v = frame.locals.get(idx).ok_or_else(|| VmError {
                     message: "local index out of bounds".to_string(),
                 })?;
                 stack.push(v.clone());
             }
             x if x == OpCode::StoreLocal as u8 => {
-                let idx = read_u32(code, &mut ip)? as usize;
+                let idx = read_u32(code, &mut frame.ip)? as usize;
                 let v = stack.pop().ok_or_else(|| VmError {
                     message: "stack underflow in STORE_LOCAL".to_string(),
                 })?;
-                if locals.len() <= idx {
-                    locals.resize(idx + 1, Value::Unit);
+                if frame.locals.len() <= idx {
+                    frame.locals.resize(idx + 1, Value::Unit);
                 }
-                locals[idx] = v;
+                frame.locals[idx] = v;
             }
             x if x == OpCode::Pop as u8 => {
                 stack.pop().ok_or_else(|| VmError {
@@ -103,16 +111,16 @@ pub fn run_bytecode(bytecode: &[u8], _args: &[String]) -> Result<(), VmError> {
                 })?;
             }
             x if x == OpCode::Jump as u8 => {
-                let target = read_u32(code, &mut ip)? as usize;
+                let target = read_u32(code, &mut frame.ip)? as usize;
                 if target > code.len() {
                     return Err(VmError {
                         message: "jump target out of bounds".to_string(),
                     });
                 }
-                ip = target;
+                frame.ip = target;
             }
             x if x == OpCode::JumpIfFalse as u8 => {
-                let target = read_u32(code, &mut ip)? as usize;
+                let target = read_u32(code, &mut frame.ip)? as usize;
                 let cond = stack.pop().ok_or_else(|| VmError {
                     message: "stack underflow in JMP_IF_FALSE".to_string(),
                 })?;
@@ -130,12 +138,12 @@ pub fn run_bytecode(bytecode: &[u8], _args: &[String]) -> Result<(), VmError> {
                             message: "jump target out of bounds".to_string(),
                         });
                     }
-                    ip = target;
+                    frame.ip = target;
                 }
             }
             x if x == OpCode::CallBuiltin as u8 => {
-                let id = read_u8(code, &mut ip)?;
-                let argc = read_u8(code, &mut ip)? as usize;
+                let id = read_u8(code, &mut frame.ip)?;
+                let argc = read_u8(code, &mut frame.ip)? as usize;
                 if stack.len() < argc {
                     return Err(VmError {
                         message: "stack underflow in CALL_BUILTIN".to_string(),
@@ -145,9 +153,35 @@ pub fn run_bytecode(bytecode: &[u8], _args: &[String]) -> Result<(), VmError> {
                 let result = call_builtin(id, &args)?;
                 stack.push(result);
             }
+            x if x == OpCode::CallFn as u8 => {
+                let fn_id = read_u32(code, &mut frame.ip)? as usize;
+                let argc = read_u8(code, &mut frame.ip)? as usize;
+                let target = functions.get(fn_id).ok_or_else(|| VmError {
+                    message: "function id out of bounds".to_string(),
+                })?;
+                if target.arity as usize != argc {
+                    return Err(VmError {
+                        message: format!(
+                            "function arity mismatch: expected {}, got {}",
+                            target.arity, argc
+                        ),
+                    });
+                }
+                if stack.len() < argc {
+                    return Err(VmError {
+                        message: "stack underflow in CALL_FN".to_string(),
+                    });
+                }
+                let args = stack.split_off(stack.len() - argc);
+                frames.push(Frame {
+                    fn_id,
+                    ip: 0,
+                    locals: args,
+                });
+            }
             x if x == OpCode::MkAdt as u8 => {
-                let tag_idx = read_u32(code, &mut ip)? as usize;
-                let argc = read_u8(code, &mut ip)? as usize;
+                let tag_idx = read_u32(code, &mut frame.ip)? as usize;
+                let argc = read_u8(code, &mut frame.ip)? as usize;
                 if stack.len() < argc {
                     return Err(VmError {
                         message: "stack underflow in MK_ADT".to_string(),
@@ -163,8 +197,8 @@ pub fn run_bytecode(bytecode: &[u8], _args: &[String]) -> Result<(), VmError> {
                 });
             }
             x if x == OpCode::JumpIfTag as u8 => {
-                let tag_idx = read_u32(code, &mut ip)? as usize;
-                let target = read_u32(code, &mut ip)? as usize;
+                let tag_idx = read_u32(code, &mut frame.ip)? as usize;
+                let target = read_u32(code, &mut frame.ip)? as usize;
                 let tag = strings.get(tag_idx).ok_or_else(|| VmError {
                     message: "adt tag index out of bounds".to_string(),
                 })?;
@@ -181,11 +215,11 @@ pub fn run_bytecode(bytecode: &[u8], _args: &[String]) -> Result<(), VmError> {
                             message: "jump target out of bounds".to_string(),
                         });
                     }
-                    ip = target;
+                    frame.ip = target;
                 }
             }
             x if x == OpCode::AssertConst as u8 => {
-                let msg_idx = read_u32(code, &mut ip)? as usize;
+                let msg_idx = read_u32(code, &mut frame.ip)? as usize;
                 let msg = strings.get(msg_idx).ok_or_else(|| VmError {
                     message: "assert message index out of bounds".to_string(),
                 })?;
@@ -220,7 +254,7 @@ pub fn run_bytecode(bytecode: &[u8], _args: &[String]) -> Result<(), VmError> {
                 stack.push(Value::Unit);
             }
             x if x == OpCode::GetAdtField as u8 => {
-                let idx = read_u8(code, &mut ip)? as usize;
+                let idx = read_u8(code, &mut frame.ip)? as usize;
                 let value = stack.pop().ok_or_else(|| VmError {
                     message: "stack underflow in GET_ADT_FIELD".to_string(),
                 })?;
@@ -238,20 +272,24 @@ pub fn run_bytecode(bytecode: &[u8], _args: &[String]) -> Result<(), VmError> {
                 let ret = stack.pop().ok_or_else(|| VmError {
                     message: "stack underflow in RET".to_string(),
                 })?;
-                let code = match ret {
-                    Value::Int(v) => v as i32,
-                    _ => {
+                frames.pop();
+                if frames.is_empty() {
+                    let code = match ret {
+                        Value::Int(v) => v as i32,
+                        _ => {
+                            return Err(VmError {
+                                message: "main must return an integer exit code".to_string(),
+                            });
+                        }
+                    };
+                    if code != 0 {
                         return Err(VmError {
-                            message: "main must return an integer exit code".to_string(),
+                            message: format!("program exited with status {code}"),
                         });
                     }
-                };
-                if code != 0 {
-                    return Err(VmError {
-                        message: format!("program exited with status {code}"),
-                    });
+                    return Ok(());
                 }
-                return Ok(());
+                stack.push(ret);
             }
             _ => {
                 return Err(VmError {
@@ -264,6 +302,55 @@ pub fn run_bytecode(bytecode: &[u8], _args: &[String]) -> Result<(), VmError> {
     Err(VmError {
         message: "program terminated without RET".to_string(),
     })
+}
+
+fn decode(bytecode: &[u8]) -> Result<(Vec<String>, Vec<FunctionBlob>, u32), VmError> {
+    let mut cursor = 0usize;
+    if bytecode.len() < 4 || &bytecode[0..4] != MAGIC {
+        return Err(VmError {
+            message: "invalid bytecode header".to_string(),
+        });
+    }
+    cursor += 4;
+
+    let nstrings = read_u32(bytecode, &mut cursor)? as usize;
+    let mut strings = Vec::with_capacity(nstrings);
+    for _ in 0..nstrings {
+        let len = read_u32(bytecode, &mut cursor)? as usize;
+        if cursor + len > bytecode.len() {
+            return Err(VmError {
+                message: "corrupt bytecode string table".to_string(),
+            });
+        }
+        let s = std::str::from_utf8(&bytecode[cursor..cursor + len]).map_err(|_| VmError {
+            message: "bytecode string table contains invalid utf-8".to_string(),
+        })?;
+        strings.push(s.to_string());
+        cursor += len;
+    }
+
+    let nfuncs = read_u32(bytecode, &mut cursor)? as usize;
+    let mut functions = Vec::with_capacity(nfuncs);
+    for _ in 0..nfuncs {
+        let arity = read_u8(bytecode, &mut cursor)?;
+        let code_len = read_u32(bytecode, &mut cursor)? as usize;
+        if cursor + code_len > bytecode.len() {
+            return Err(VmError {
+                message: "corrupt bytecode function section".to_string(),
+            });
+        }
+        let code = bytecode[cursor..cursor + code_len].to_vec();
+        cursor += code_len;
+        functions.push(FunctionBlob { arity, code });
+    }
+
+    let entry = read_u32(bytecode, &mut cursor)?;
+    if cursor != bytecode.len() {
+        return Err(VmError {
+            message: "trailing bytes in bytecode stream".to_string(),
+        });
+    }
+    Ok((strings, functions, entry))
 }
 
 fn as_bool(value: Value) -> Result<bool, VmError> {

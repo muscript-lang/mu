@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
-use crate::ast::{Decl, Expr, FunctionDecl, Literal, Pattern, Program};
+use crate::ast::{Decl, Expr, Literal, Pattern, Program};
 
 pub const MAGIC: &[u8; 4] = b"MUB1";
 
@@ -37,43 +37,82 @@ pub enum OpCode {
     AssertConst = 14,
     AssertDyn = 15,
     GetAdtField = 16,
+    CallFn = 17,
+}
+
+#[derive(Debug, Clone)]
+pub struct FunctionBytecode {
+    pub arity: u8,
+    pub code: Vec<u8>,
 }
 
 #[derive(Default)]
-struct Lowerer {
+struct CompileCtx {
     strings: Vec<String>,
     string_ids: HashMap<String, u32>,
+    ctor_names: HashSet<String>,
+    fn_ids: HashMap<String, u32>,
+}
+
+struct Lowerer<'a> {
+    ctx: &'a mut CompileCtx,
     code: Vec<u8>,
     locals: HashMap<String, u32>,
     next_local: u32,
-    ctor_names: HashSet<String>,
 }
 
 pub fn compile(program: &Program) -> Result<Vec<u8>, BytecodeError> {
-    let main = find_main(program)?;
-    let mut lowerer = Lowerer {
-        ctor_names: collect_ctors(program),
-        ..Lowerer::default()
-    };
-    lowerer.lower_expr(&main.expr)?;
-    lowerer.code.push(OpCode::Return as u8);
-    Ok(encode(&lowerer))
-}
-
-fn find_main(program: &Program) -> Result<&FunctionDecl, BytecodeError> {
+    let mut functions = Vec::new();
     for decl in &program.module.decls {
         if let Decl::Function(f) = decl {
-            if f.name.name == "main" {
-                return Ok(f);
-            }
+            functions.push(f);
         }
     }
-    Err(BytecodeError {
+    if functions.is_empty() {
+        return Err(BytecodeError {
+            message: "missing `main` function".to_string(),
+        });
+    }
+
+    let mut ctx = CompileCtx {
+        ctor_names: collect_ctors(program),
+        ..CompileCtx::default()
+    };
+    for (idx, f) in functions.iter().enumerate() {
+        ctx.fn_ids.insert(f.name.name.clone(), idx as u32);
+    }
+    let main_id = *ctx.fn_ids.get("main").ok_or_else(|| BytecodeError {
         message: "missing `main` function".to_string(),
-    })
+    })?;
+
+    let mut fn_bodies = Vec::new();
+    for f in functions {
+        let mut lowerer = Lowerer::new(&mut ctx, f.sig.params.len() as u32);
+        lowerer.lower_expr(&f.expr)?;
+        lowerer.code.push(OpCode::Return as u8);
+        fn_bodies.push(FunctionBytecode {
+            arity: f.sig.params.len() as u8,
+            code: lowerer.code,
+        });
+    }
+
+    Ok(encode(&ctx.strings, &fn_bodies, main_id))
 }
 
-impl Lowerer {
+impl<'a> Lowerer<'a> {
+    fn new(ctx: &'a mut CompileCtx, arity: u32) -> Self {
+        let mut locals = HashMap::new();
+        for i in 0..arity {
+            locals.insert(format!("arg{i}"), i);
+        }
+        Lowerer {
+            ctx,
+            code: Vec::new(),
+            locals,
+            next_local: arity,
+        }
+    }
+
     fn lower_expr(&mut self, expr: &Expr) -> Result<(), BytecodeError> {
         match expr {
             Expr::Literal(Literal::Int(v, _)) => {
@@ -101,8 +140,7 @@ impl Lowerer {
                 name, value, body, ..
             } => {
                 self.lower_expr(value)?;
-                let slot = self.next_local;
-                self.next_local += 1;
+                let slot = self.alloc_local();
                 self.code.push(OpCode::StoreLocal as u8);
                 self.code.extend_from_slice(&slot.to_le_bytes());
                 let prev = self.locals.insert(name.name.clone(), slot);
@@ -130,15 +168,12 @@ impl Lowerer {
                 self.code.push(OpCode::JumpIfFalse as u8);
                 let patch_false = self.code.len();
                 self.code.extend_from_slice(&0u32.to_le_bytes());
-
                 self.lower_expr(then_branch)?;
                 self.code.push(OpCode::Jump as u8);
                 let patch_end = self.code.len();
                 self.code.extend_from_slice(&0u32.to_le_bytes());
-
                 let false_ip = self.code.len() as u32;
                 self.code[patch_false..patch_false + 4].copy_from_slice(&false_ip.to_le_bytes());
-
                 self.lower_expr(else_branch)?;
                 let end_ip = self.code.len() as u32;
                 self.code[patch_end..patch_end + 4].copy_from_slice(&end_ip.to_le_bytes());
@@ -146,25 +181,31 @@ impl Lowerer {
             Expr::Call { callee, args, .. } => {
                 let Expr::Name(name) = &**callee else {
                     return Err(BytecodeError {
-                        message: "only direct builtin calls are supported in v0.1 runtime".to_string(),
+                        message: "only direct named calls are supported in v0.1 runtime".to_string(),
                     });
                 };
-                let builtin_id = builtin_id(&name.name).ok_or_else(|| BytecodeError {
-                    message: format!("unsupported call target `{}`", name.name),
-                })?;
                 for arg in args {
                     self.lower_expr(arg)?;
                 }
-                self.code.push(OpCode::CallBuiltin as u8);
-                self.code.push(builtin_id);
-                self.code.push(args.len() as u8);
+                if let Some(builtin_id) = builtin_id(&name.name) {
+                    self.code.push(OpCode::CallBuiltin as u8);
+                    self.code.push(builtin_id);
+                    self.code.push(args.len() as u8);
+                } else if let Some(fn_id) = self.ctx.fn_ids.get(&name.name).copied() {
+                    self.code.push(OpCode::CallFn as u8);
+                    self.code.extend_from_slice(&fn_id.to_le_bytes());
+                    self.code.push(args.len() as u8);
+                } else {
+                    return Err(BytecodeError {
+                        message: format!("unsupported call target `{}`", name.name),
+                    });
+                }
             }
             Expr::Match { scrutinee, arms, .. } => {
                 self.lower_expr(scrutinee)?;
                 let scrut_slot = self.alloc_local();
                 self.code.push(OpCode::StoreLocal as u8);
                 self.code.extend_from_slice(&scrut_slot.to_le_bytes());
-
                 let mut end_jumps = Vec::new();
                 for arm in arms {
                     match &arm.pattern {
@@ -238,7 +279,7 @@ impl Lowerer {
                         _ => {
                             return Err(BytecodeError {
                                 message:
-                                    "only boolean and wildcard patterns are supported in bytecode lowering"
+                                    "only boolean and constructor/wildcard patterns are supported in bytecode lowering"
                                         .to_string(),
                             });
                         }
@@ -273,7 +314,7 @@ impl Lowerer {
                 self.code.extend_from_slice(&msg_id.to_le_bytes());
             }
             Expr::NameApp { name, args, .. } => {
-                if !self.ctor_names.contains(&name.name) {
+                if !self.ctx.ctor_names.contains(&name.name) {
                     return Err(BytecodeError {
                         message: format!(
                             "name application `{}` is not a known constructor in this module",
@@ -289,8 +330,7 @@ impl Lowerer {
                 self.code.extend_from_slice(&tag_id.to_le_bytes());
                 self.code.push(args.len() as u8);
             }
-            Expr::Lambda { .. }
-             => {
+            Expr::Lambda { .. } => {
                 return Err(BytecodeError {
                     message: "expression form not supported by bytecode lowering yet".to_string(),
                 });
@@ -300,12 +340,12 @@ impl Lowerer {
     }
 
     fn intern_string(&mut self, s: &str) -> u32 {
-        if let Some(id) = self.string_ids.get(s) {
+        if let Some(id) = self.ctx.string_ids.get(s) {
             return *id;
         }
-        let id = self.strings.len() as u32;
-        self.strings.push(s.to_string());
-        self.string_ids.insert(s.to_string(), id);
+        let id = self.ctx.strings.len() as u32;
+        self.ctx.strings.push(s.to_string());
+        self.ctx.string_ids.insert(s.to_string(), id);
         id
     }
 
@@ -363,16 +403,21 @@ fn builtin_id(name: &str) -> Option<u8> {
     }
 }
 
-fn encode(lowerer: &Lowerer) -> Vec<u8> {
+fn encode(strings: &[String], functions: &[FunctionBytecode], entry_fn: u32) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(MAGIC);
-    out.extend_from_slice(&(lowerer.strings.len() as u32).to_le_bytes());
-    for s in &lowerer.strings {
+    out.extend_from_slice(&(strings.len() as u32).to_le_bytes());
+    for s in strings {
         let bytes = s.as_bytes();
         out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
         out.extend_from_slice(bytes);
     }
-    out.extend_from_slice(&(lowerer.code.len() as u32).to_le_bytes());
-    out.extend_from_slice(&lowerer.code);
+    out.extend_from_slice(&(functions.len() as u32).to_le_bytes());
+    for f in functions {
+        out.push(f.arity);
+        out.extend_from_slice(&(f.code.len() as u32).to_le_bytes());
+        out.extend_from_slice(&f.code);
+    }
+    out.extend_from_slice(&entry_fn.to_le_bytes());
     out
 }
