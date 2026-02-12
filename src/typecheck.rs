@@ -21,6 +21,7 @@ pub enum TypeErrorCode {
     DuplicateSymbol,
     InvalidEffectSet,
     InvalidReturnMagic,
+    InvalidMainSignature,
 }
 
 impl TypeErrorCode {
@@ -39,6 +40,7 @@ impl TypeErrorCode {
             TypeErrorCode::DuplicateSymbol => "E3011",
             TypeErrorCode::InvalidEffectSet => "E3012",
             TypeErrorCode::InvalidReturnMagic => "E3013",
+            TypeErrorCode::InvalidMainSignature => "E3014",
         }
     }
 }
@@ -274,6 +276,9 @@ fn check_one_module(
                 expect_type(&expected, &got.ty, v.expr.span())?;
             }
             Decl::Function(f) => {
+                if f.name.name == "main" {
+                    validate_main_signature(f)?;
+                }
                 let mut ctx = CheckCtx {
                     module_name,
                     module,
@@ -304,6 +309,25 @@ fn check_one_module(
                 }
             }
         }
+    }
+    Ok(())
+}
+
+fn validate_main_signature(f: &crate::ast::FunctionDecl) -> Result<(), TypeError> {
+    if !f.sig.params.is_empty() {
+        return Err(TypeError {
+            code: TypeErrorCode::InvalidMainSignature,
+            span: f.sig.span,
+            message: "`main` must have zero parameters".to_string(),
+        });
+    }
+    let ret = ast_type_to_type(&f.sig.ret)?;
+    if ret != Type::I32 {
+        return Err(TypeError {
+            code: TypeErrorCode::InvalidMainSignature,
+            span: f.sig.span,
+            message: "`main` must return i32".to_string(),
+        });
     }
     Ok(())
 }
