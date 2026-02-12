@@ -19,6 +19,7 @@ pub enum TypeErrorCode {
     InvalidPattern,
     DuplicateModule,
     DuplicateSymbol,
+    InvalidEffectSet,
 }
 
 impl TypeErrorCode {
@@ -35,6 +36,7 @@ impl TypeErrorCode {
             TypeErrorCode::InvalidPattern => "E3009",
             TypeErrorCode::DuplicateModule => "E3010",
             TypeErrorCode::DuplicateSymbol => "E3011",
+            TypeErrorCode::InvalidEffectSet => "E3012",
         }
     }
 }
@@ -189,6 +191,7 @@ fn build_module_sigs(programs: &[Program]) -> Result<BTreeMap<String, ModuleSigs
                     values.insert(d.name.name.clone(), ast_type_to_type(&d.ty)?);
                 }
                 Decl::Function(d) => {
+                    validate_effect_set(&d.sig.effects, d.sig.span)?;
                     if values.contains_key(&d.name.name) {
                         return Err(TypeError {
                             code: TypeErrorCode::DuplicateSymbol,
@@ -451,6 +454,7 @@ fn check_expr(ctx: &mut CheckCtx<'_>, expr: &Expr) -> Result<ExprCheck, TypeErro
             body,
             ..
         } => {
+            validate_effect_set(effects, expr.span())?;
             let mut nested = ctx.clone();
             let mut param_types = Vec::new();
             for p in params {
@@ -873,6 +877,47 @@ fn effect_set_to_string(effects: &EffectSet) -> String {
             .collect::<Vec<_>>()
             .join(",");
         format!("!{{{names}}}")
+    }
+}
+
+fn validate_effect_set(effects: &EffectSet, span: Span) -> Result<(), TypeError> {
+    let mut seen = BTreeSet::new();
+    let mut last_rank: Option<u8> = None;
+    for atom in &effects.atoms {
+        let rank = effect_rank(*atom);
+        if let Some(prev) = last_rank {
+            if rank <= prev {
+                return Err(TypeError {
+                    code: TypeErrorCode::InvalidEffectSet,
+                    span,
+                    message: format!(
+                        "effect set must be unique and sorted canonically as {}",
+                        "io,fs,net,proc,rand,time,st"
+                    ),
+                });
+            }
+        }
+        if !seen.insert(*atom) {
+            return Err(TypeError {
+                code: TypeErrorCode::InvalidEffectSet,
+                span,
+                message: "effect set contains duplicates".to_string(),
+            });
+        }
+        last_rank = Some(rank);
+    }
+    Ok(())
+}
+
+fn effect_rank(atom: EffectAtom) -> u8 {
+    match atom {
+        EffectAtom::Io => 0,
+        EffectAtom::Fs => 1,
+        EffectAtom::Net => 2,
+        EffectAtom::Proc => 3,
+        EffectAtom::Rand => 4,
+        EffectAtom::Time => 5,
+        EffectAtom::St => 6,
     }
 }
 

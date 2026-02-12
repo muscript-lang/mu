@@ -50,3 +50,19 @@ fn imports_validate_against_loaded_modules() {
     let dep = parse_str(dep_src).expect("dep parses");
     check_programs(&[main, dep]).expect("known import should pass");
 }
+
+#[test]
+fn unsorted_effect_set_is_rejected() {
+    let src = "@m.fx{F main:()->i32!{fs,io}=0;}";
+    let program = parse_str(src).expect("program should parse");
+    let err = check_program(&program).expect_err("unsorted effect set should fail");
+    assert_eq!(err.code.as_str(), "E3012");
+}
+
+#[test]
+fn duplicate_effect_atom_is_rejected() {
+    let src = "@m.fx2{F main:()->i32!{io,io}=0;}";
+    let program = parse_str(src).expect("program should parse");
+    let err = check_program(&program).expect_err("duplicate effect atom should fail");
+    assert_eq!(err.code.as_str(), "E3012");
+}
