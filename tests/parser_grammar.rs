@@ -22,3 +22,12 @@ fn parses_type_variants() {
     let formatted = format_program(&program);
     assert!(formatted.starts_with("@tm.m{"));
 }
+
+#[test]
+fn formatter_keeps_ensure_parseable() {
+    let src = "@m.e{F main:()->i32={_ t;0};}";
+    let program = parse_str(src).expect("program should parse");
+    let formatted = format_program(&program);
+    assert!(formatted.contains("_ t"), "ensure should include separator");
+    parse_str(formatted.trim_end()).expect("formatted ensure should reparse");
+}

@@ -333,6 +333,7 @@ fn format_expr(expr: &Expr, out: &mut String) {
         }
         Expr::Ensure { expr, .. } => {
             out.push('_');
+            out.push(' ');
             format_expr(expr, out);
         }
         Expr::Name(id) => out.push_str(&id.name),
