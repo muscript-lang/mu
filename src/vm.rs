@@ -287,7 +287,7 @@ pub fn run_bytecode(bytecode: &[u8], _args: &[String]) -> Result<(), VmError> {
                 let is_true = as_bool(cond)?;
                 if !is_true {
                     return Err(VmError {
-                        message: format!("assert failure: {msg}"),
+                        message: with_code("E4001", &format!("assert failure: {msg}")),
                     });
                 }
                 stack.push(Value::Unit);
@@ -306,7 +306,7 @@ pub fn run_bytecode(bytecode: &[u8], _args: &[String]) -> Result<(), VmError> {
                         _ => "assert failure".to_string(),
                     };
                     return Err(VmError {
-                        message: format!("assert failure: {message}"),
+                        message: with_code("E4001", &format!("assert failure: {message}")),
                     });
                 }
                 stack.push(Value::Unit);
@@ -322,7 +322,7 @@ pub fn run_bytecode(bytecode: &[u8], _args: &[String]) -> Result<(), VmError> {
                     });
                 };
                 let field = fields.get(idx).ok_or_else(|| VmError {
-                    message: "adt field index out of bounds".to_string(),
+                    message: with_code("E4004", "adt field index out of bounds"),
                 })?;
                 stack.push(field.clone());
             }
@@ -342,7 +342,7 @@ pub fn run_bytecode(bytecode: &[u8], _args: &[String]) -> Result<(), VmError> {
                     };
                     if code != 0 {
                         return Err(VmError {
-                            message: format!("program exited with status {code}"),
+                            message: with_code("E4006", &format!("program exited with status {code}")),
                         });
                     }
                     return Ok(());
@@ -611,7 +611,7 @@ fn call_builtin(id: u8, args: &[Value]) -> Result<Value, VmError> {
             let (a, b) = int2(args, "/")?;
             if b == 0 {
                 return Err(VmError {
-                    message: "division by zero".to_string(),
+                    message: with_code("E4003", "division by zero"),
                 });
             }
             Ok(Value::Int(a / b))
@@ -620,7 +620,7 @@ fn call_builtin(id: u8, args: &[Value]) -> Result<Value, VmError> {
             let (a, b) = int2(args, "%")?;
             if b == 0 {
                 return Err(VmError {
-                    message: "division by zero".to_string(),
+                    message: with_code("E4003", "division by zero"),
                 });
             }
             Ok(Value::Int(a % b))
@@ -761,4 +761,8 @@ fn read_i64(bytes: &[u8], cursor: &mut usize) -> Result<i64, VmError> {
     buf.copy_from_slice(&bytes[*cursor..*cursor + 8]);
     *cursor += 8;
     Ok(i64::from_le_bytes(buf))
+}
+
+fn with_code(code: &str, message: &str) -> String {
+    format!("{code}: {message}")
 }
