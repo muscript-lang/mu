@@ -50,6 +50,13 @@ fn import_of_builtin_core_module_passes_without_workspace_sources() {
 }
 
 #[test]
+fn imports_of_all_builtin_core_modules_pass_without_workspace_sources() {
+    let src = "@a.main{:p=core.prelude;:i=core.io;:f=core.fs;:j=core.json;:r=core.proc;:h=core.http;F main:()->i32=0;}";
+    let program = parse_str(src).expect("program should parse");
+    check_program(&program).expect("all builtin core modules should be recognized");
+}
+
+#[test]
 fn import_of_unknown_builtin_core_module_fails() {
     let src = "@a.main{:x=core.missing;F main:()->i32=0;}";
     let program = parse_str(src).expect("program should parse");
