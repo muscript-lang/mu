@@ -39,3 +39,11 @@ fn parses_symbolic_prelude_operator_names() {
     let formatted = format_program(&program);
     assert!(formatted.contains("c(+,1,2)"));
 }
+
+#[test]
+fn allows_t_and_f_as_identifiers_outside_literal_positions() {
+    let src = "@t.m{F f:()->i32=0;F main:()->i32=c(f);}";
+    let program = parse_str(src).expect("program should parse");
+    let formatted = format_program(&program);
+    assert!(formatted.starts_with("@t.m{"));
+}

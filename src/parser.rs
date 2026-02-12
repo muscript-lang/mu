@@ -559,8 +559,9 @@ impl Parser {
             });
         }
         if self.at_simple(TokenKind::Int(0))
-            || self.at_simple(TokenKind::Bool(false))
             || self.at_simple(TokenKind::String(String::new()))
+            || self.at_ident_text("t")
+            || self.at_ident_text("f")
         {
             return Ok(Expr::Literal(self.parse_literal()?));
         }
@@ -812,7 +813,8 @@ impl Parser {
         let token = self.bump();
         match token.kind {
             TokenKind::Int(v) => Ok(Literal::Int(v, token.span)),
-            TokenKind::Bool(v) => Ok(Literal::Bool(v, token.span)),
+            TokenKind::Ident(name) if name == "t" => Ok(Literal::Bool(true, token.span)),
+            TokenKind::Ident(name) if name == "f" => Ok(Literal::Bool(false, token.span)),
             TokenKind::String(v) => Ok(Literal::String(v, token.span)),
             _ => Err(ParseError {
                 code: ParseErrorCode::ExpectedExpr,
@@ -827,8 +829,9 @@ impl Parser {
             return Ok(Pattern::Wildcard(self.bump().span));
         }
         if self.at_simple(TokenKind::Int(0))
-            || self.at_simple(TokenKind::Bool(false))
             || self.at_simple(TokenKind::String(String::new()))
+            || self.at_ident_text("t")
+            || self.at_ident_text("f")
         {
             return Ok(Pattern::Literal(self.parse_literal()?));
         }
@@ -931,7 +934,6 @@ impl Parser {
         use TokenKind::*;
         match (&self.tokens[self.pos + n].kind, &expected) {
             (Int(_), Int(_)) => true,
-            (Bool(_), Bool(_)) => true,
             (String(_), String(_)) => true,
             (a, b) => std::mem::discriminant(a) == std::mem::discriminant(b),
         }
@@ -941,7 +943,6 @@ impl Parser {
         use TokenKind::*;
         match (&self.peek().kind, &expected) {
             (Int(_), Int(_)) => true,
-            (Bool(_), Bool(_)) => true,
             (String(_), String(_)) => true,
             (a, b) => std::mem::discriminant(a) == std::mem::discriminant(b),
         }

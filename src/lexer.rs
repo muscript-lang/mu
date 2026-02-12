@@ -89,7 +89,6 @@ pub enum TokenKind {
     Underscore,
     Ident(String),
     Int(i64),
-    Bool(bool),
     String(String),
     Eof,
 }
@@ -368,11 +367,7 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        let kind = match name.as_str() {
-            "t" => TokenKind::Bool(true),
-            "f" => TokenKind::Bool(false),
-            _ => TokenKind::Ident(name),
-        };
+        let kind = TokenKind::Ident(name);
         Token {
             kind,
             span: Span {
