@@ -118,6 +118,11 @@ pub fn check_program(program: &Program) -> Result<(), TypeError> {
     check_programs(std::slice::from_ref(program))
 }
 
+pub fn validate_modules(programs: &[Program]) -> Result<(), TypeError> {
+    let _ = build_module_sigs(programs)?;
+    Ok(())
+}
+
 pub fn check_programs(programs: &[Program]) -> Result<(), TypeError> {
     let modules = build_module_sigs(programs)?;
     for program in programs {
