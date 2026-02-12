@@ -138,3 +138,11 @@ fn bytecode_runs_name_pattern_as_binding() {
     let bc = compile(&program).expect("program should lower to bytecode");
     run_bytecode(&bc, &[]).expect("binding name pattern should run");
 }
+
+#[test]
+fn bytecode_runs_top_level_value_reference() {
+    let src = "@x.v1{V x:i32=0;F main:()->i32=x;}";
+    let program = parse_str(src).expect("program should parse");
+    let bc = compile(&program).expect("program should lower to bytecode");
+    run_bytecode(&bc, &[]).expect("top-level V should be loadable");
+}

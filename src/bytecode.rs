@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 
-use crate::ast::{Decl, Expr, FunctionDecl, Literal, Param, Pattern, Program};
+use crate::ast::{Decl, Expr, FunctionDecl, Literal, Param, Pattern, Program, ValueDecl};
 
 pub const MAGIC: &[u8; 4] = b"MUB1";
 
@@ -55,6 +55,7 @@ struct CompileCtx {
     string_ids: HashMap<String, u32>,
     ctor_names: HashSet<String>,
     fn_ids: HashMap<String, u32>,
+    value_ids: HashMap<String, u32>,
     functions: Vec<FunctionBytecode>,
 }
 
@@ -67,9 +68,12 @@ struct Lowerer<'a> {
 
 pub fn compile(program: &Program) -> Result<Vec<u8>, BytecodeError> {
     let mut top_functions = Vec::new();
+    let mut top_values = Vec::new();
     for decl in &program.module.decls {
-        if let Decl::Function(f) = decl {
-            top_functions.push(f);
+        match decl {
+            Decl::Function(f) => top_functions.push(f),
+            Decl::Value(v) => top_values.push(v),
+            _ => {}
         }
     }
     if top_functions.is_empty() {
@@ -83,10 +87,16 @@ pub fn compile(program: &Program) -> Result<Vec<u8>, BytecodeError> {
         ..CompileCtx::default()
     };
 
-    for (idx, f) in top_functions.iter().enumerate() {
-        ctx.fn_ids.insert(f.name.name.clone(), idx as u32);
+    let mut next_id = 0u32;
+    for v in &top_values {
+        ctx.value_ids.insert(v.name.name.clone(), next_id);
+        next_id += 1;
     }
-    let top_len = top_functions.len();
+    for f in &top_functions {
+        ctx.fn_ids.insert(f.name.name.clone(), next_id);
+        next_id += 1;
+    }
+    let top_len = top_values.len() + top_functions.len();
     ctx.functions = vec![
         FunctionBytecode {
             arity: 0,
@@ -96,9 +106,13 @@ pub fn compile(program: &Program) -> Result<Vec<u8>, BytecodeError> {
         top_len
     ];
 
+    for (idx, v) in top_values.iter().enumerate() {
+        let func = lower_top_value(&mut ctx, v)?;
+        ctx.functions[idx] = func;
+    }
     for (idx, f) in top_functions.iter().enumerate() {
         let func = lower_top_function(&mut ctx, f)?;
-        ctx.functions[idx] = func;
+        ctx.functions[top_values.len() + idx] = func;
     }
 
     let entry_fn = *ctx.fn_ids.get("main").ok_or_else(|| BytecodeError {
@@ -128,6 +142,22 @@ fn lower_top_function(ctx: &mut CompileCtx, f: &FunctionDecl) -> Result<Function
     })
 }
 
+fn lower_top_value(ctx: &mut CompileCtx, v: &ValueDecl) -> Result<FunctionBytecode, BytecodeError> {
+    let mut lowerer = Lowerer {
+        ctx,
+        code: Vec::new(),
+        next_local: 0,
+        locals: BTreeMap::new(),
+    };
+    lowerer.lower_expr(&v.expr)?;
+    lowerer.code.push(OpCode::Return as u8);
+    Ok(FunctionBytecode {
+        arity: 0,
+        captures: 0,
+        code: lowerer.code,
+    })
+}
+
 impl<'a> Lowerer<'a> {
     fn lower_expr(&mut self, expr: &Expr) -> Result<(), BytecodeError> {
         match expr {
@@ -146,11 +176,18 @@ impl<'a> Lowerer<'a> {
             }
             Expr::Unit(_) => self.code.push(OpCode::PushUnit as u8),
             Expr::Name(id) => {
-                let slot = self.locals.get(&id.name).ok_or_else(|| BytecodeError {
-                    message: format!("unsupported unresolved name `{}` in lowering", id.name),
-                })?;
-                self.code.push(OpCode::LoadLocal as u8);
-                self.code.extend_from_slice(&slot.to_le_bytes());
+                if let Some(slot) = self.locals.get(&id.name) {
+                    self.code.push(OpCode::LoadLocal as u8);
+                    self.code.extend_from_slice(&slot.to_le_bytes());
+                } else if let Some(value_id) = self.ctx.value_ids.get(&id.name).copied() {
+                    self.code.push(OpCode::CallFn as u8);
+                    self.code.extend_from_slice(&value_id.to_le_bytes());
+                    self.code.push(0);
+                } else {
+                    return Err(BytecodeError {
+                        message: format!("unsupported unresolved name `{}` in lowering", id.name),
+                    });
+                }
             }
             Expr::Let {
                 name, value, body, ..
