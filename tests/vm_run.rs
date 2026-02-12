@@ -41,3 +41,19 @@ fn bytecode_runs_nullary_ctor_match() {
     let bc = compile(&program).expect("program should lower to bytecode");
     run_bytecode(&bc, &[]).expect("bytecode should run");
 }
+
+#[test]
+fn bytecode_runs_fs_write_and_read_calls() {
+    let src = "@x.fs{F main:()->i32!{fs}={c(write,\"/tmp/mu_vm_fs.txt\",\"hello\");c(read,\"/tmp/mu_vm_fs.txt\");0};}";
+    let program = parse_str(src).expect("program should parse");
+    let bc = compile(&program).expect("program should lower to bytecode");
+    run_bytecode(&bc, &[]).expect("bytecode should run");
+}
+
+#[test]
+fn bytecode_runs_json_parse_and_stringify_calls() {
+    let src = "@x.json{F main:()->i32={c(parse,\"{\\\"a\\\":1}\");c(stringify,\"{\\\"a\\\":1}\");0};}";
+    let program = parse_str(src).expect("program should parse");
+    let bc = compile(&program).expect("program should lower to bytecode");
+    run_bytecode(&bc, &[]).expect("bytecode should run");
+}

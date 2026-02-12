@@ -305,6 +305,13 @@ fn builtin_id(name: &str) -> Option<u8> {
     match name {
         "print" => Some(1),
         "println" => Some(2),
+        "readln" => Some(3),
+        "read" => Some(4),
+        "write" => Some(5),
+        "parse" => Some(6),
+        "stringify" => Some(7),
+        "run" => Some(8),
+        "get" => Some(9),
         _ => None,
     }
 }

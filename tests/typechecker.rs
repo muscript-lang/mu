@@ -66,3 +66,25 @@ fn duplicate_effect_atom_is_rejected() {
     let err = check_program(&program).expect_err("duplicate effect atom should fail");
     assert_eq!(err.code.as_str(), "E3012");
 }
+
+#[test]
+fn fs_effect_is_required_for_write_call() {
+    let src = "@m.fs{F main:()->i32={c(write,\"/tmp/mu_typecheck.txt\",\"x\");0};}";
+    let program = parse_str(src).expect("program should parse");
+    let err = check_program(&program).expect_err("missing fs effect should fail");
+    assert_eq!(err.code, TypeErrorCode::EffectViolation);
+}
+
+#[test]
+fn fs_effect_allows_write_call() {
+    let src = "@m.fsok{F main:()->i32!{fs}={c(write,\"/tmp/mu_typecheck.txt\",\"x\");0};}";
+    let program = parse_str(src).expect("program should parse");
+    check_program(&program).expect("fs effect should allow write");
+}
+
+#[test]
+fn json_parse_is_pure() {
+    let src = "@m.json{F main:()->i32={c(parse,\"{}\" );0};}";
+    let program = parse_str(src).expect("program should parse");
+    check_program(&program).expect("json parse should be pure");
+}

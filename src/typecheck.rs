@@ -960,6 +960,71 @@ fn builtin_values() -> &'static BTreeMap<String, Type> {
                 },
             },
         );
+        map.insert(
+            "read".to_string(),
+            Type::Function {
+                params: vec![Type::String],
+                ret: Box::new(Type::Result(
+                    Box::new(Type::String),
+                    Box::new(Type::String),
+                )),
+                effects: EffectSet {
+                    atoms: vec![EffectAtom::Fs],
+                },
+            },
+        );
+        map.insert(
+            "write".to_string(),
+            Type::Function {
+                params: vec![Type::String, Type::String],
+                ret: Box::new(Type::Result(Box::new(Type::Unit), Box::new(Type::String))),
+                effects: EffectSet {
+                    atoms: vec![EffectAtom::Fs],
+                },
+            },
+        );
+        map.insert(
+            "parse".to_string(),
+            Type::Function {
+                params: vec![Type::String],
+                ret: Box::new(Type::Result(
+                    Box::new(Type::Named("Json".to_string(), vec![])),
+                    Box::new(Type::String),
+                )),
+                effects: EffectSet::default(),
+            },
+        );
+        map.insert(
+            "stringify".to_string(),
+            Type::Function {
+                params: vec![Type::Named("Json".to_string(), vec![])],
+                ret: Box::new(Type::String),
+                effects: EffectSet::default(),
+            },
+        );
+        map.insert(
+            "run".to_string(),
+            Type::Function {
+                params: vec![Type::String, Type::Array(Box::new(Type::String))],
+                ret: Box::new(Type::Result(Box::new(Type::I32), Box::new(Type::String))),
+                effects: EffectSet {
+                    atoms: vec![EffectAtom::Proc],
+                },
+            },
+        );
+        map.insert(
+            "get".to_string(),
+            Type::Function {
+                params: vec![Type::String],
+                ret: Box::new(Type::Result(
+                    Box::new(Type::String),
+                    Box::new(Type::String),
+                )),
+                effects: EffectSet {
+                    atoms: vec![EffectAtom::Net],
+                },
+            },
+        );
         map
     })
 }

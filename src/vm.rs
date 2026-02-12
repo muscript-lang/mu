@@ -1,4 +1,5 @@
 use std::fmt;
+use std::io::Read;
 
 use crate::bytecode::{MAGIC, OpCode};
 
@@ -245,9 +246,162 @@ fn call_builtin(id: u8, args: &[Value]) -> Result<Value, VmError> {
             println!("{s}");
             Ok(Value::Unit)
         }
+        3 => {
+            if !args.is_empty() {
+                return Err(VmError {
+                    message: "readln expects zero arguments".to_string(),
+                });
+            }
+            let mut line = String::new();
+            std::io::stdin().read_line(&mut line).map_err(|e| VmError {
+                message: format!("readln failed: {e}"),
+            })?;
+            if line.ends_with('\n') {
+                line.pop();
+                if line.ends_with('\r') {
+                    line.pop();
+                }
+            }
+            Ok(Value::String(line))
+        }
+        4 => {
+            if args.len() != 1 {
+                return Err(VmError {
+                    message: "read expects one argument".to_string(),
+                });
+            }
+            let Value::String(path) = &args[0] else {
+                return Err(VmError {
+                    message: "read expects a string path".to_string(),
+                });
+            };
+            match std::fs::read_to_string(path) {
+                Ok(data) => Ok(ok_value(Value::String(data))),
+                Err(e) => Ok(err_value(format!("read failed: {e}"))),
+            }
+        }
+        5 => {
+            if args.len() != 2 {
+                return Err(VmError {
+                    message: "write expects two arguments".to_string(),
+                });
+            }
+            let Value::String(path) = &args[0] else {
+                return Err(VmError {
+                    message: "write expects a string path".to_string(),
+                });
+            };
+            let Value::String(data) = &args[1] else {
+                return Err(VmError {
+                    message: "write expects a string payload".to_string(),
+                });
+            };
+            match std::fs::write(path, data) {
+                Ok(()) => Ok(ok_value(Value::Unit)),
+                Err(e) => Ok(err_value(format!("write failed: {e}"))),
+            }
+        }
+        6 => {
+            if args.len() != 1 {
+                return Err(VmError {
+                    message: "parse expects one argument".to_string(),
+                });
+            }
+            let Value::String(text) = &args[0] else {
+                return Err(VmError {
+                    message: "parse expects a string".to_string(),
+                });
+            };
+            match serde_json::from_str::<serde_json::Value>(text) {
+                Ok(v) => match serde_json::to_string(&v) {
+                    Ok(normalized) => Ok(ok_value(Value::String(normalized))),
+                    Err(e) => Ok(err_value(format!("json stringify failed: {e}"))),
+                },
+                Err(e) => Ok(err_value(format!("json parse failed: {e}"))),
+            }
+        }
+        7 => {
+            if args.len() != 1 {
+                return Err(VmError {
+                    message: "stringify expects one argument".to_string(),
+                });
+            }
+            match &args[0] {
+                Value::String(s) => Ok(Value::String(s.clone())),
+                Value::Adt { tag, fields } => Ok(Value::String(format!("{tag}({})", fields.len()))),
+                Value::Int(v) => Ok(Value::String(v.to_string())),
+                Value::Bool(v) => Ok(Value::String(v.to_string())),
+                Value::Unit => Ok(Value::String("()".to_string())),
+            }
+        }
+        8 => {
+            if args.len() != 2 {
+                return Err(VmError {
+                    message: "run expects two arguments".to_string(),
+                });
+            }
+            let Value::String(cmd) = &args[0] else {
+                return Err(VmError {
+                    message: "run expects a string command".to_string(),
+                });
+            };
+            let Value::String(arg_text) = &args[1] else {
+                return Err(VmError {
+                    message: "run expects second argument as string (space-separated args)".to_string(),
+                });
+            };
+            let mut child = std::process::Command::new(cmd);
+            for arg in arg_text.split_whitespace() {
+                child.arg(arg);
+            }
+            match child.status() {
+                Ok(status) => Ok(ok_value(Value::Int(i64::from(status.code().unwrap_or(-1))))),
+                Err(e) => Ok(err_value(format!("run failed: {e}"))),
+            }
+        }
+        9 => {
+            if args.len() != 1 {
+                return Err(VmError {
+                    message: "get expects one argument".to_string(),
+                });
+            }
+            let Value::String(url) = &args[0] else {
+                return Err(VmError {
+                    message: "get expects a string url".to_string(),
+                });
+            };
+            match ureq::get(url).call() {
+                Ok(mut response) => {
+                    let mut body = String::new();
+                    response
+                        .body_mut()
+                        .as_reader()
+                        .read_to_string(&mut body)
+                        .map_err(|e| VmError {
+                            message: format!("get body read failed: {e}"),
+                        })?;
+                    Ok(ok_value(Value::String(body)))
+                }
+                Err(e) => Ok(err_value(format!("get failed: {e}"))),
+            }
+        }
         _ => Err(VmError {
             message: format!("unknown builtin id {id}"),
         }),
+    }
+}
+
+fn ok_value(value: Value) -> Value {
+    Value::Adt {
+        tag: "Ok".to_string(),
+        fields: vec![value],
+    }
+}
+
+fn err_value(message: String) -> Value {
+    Value::Adt {
+        tag: "Er".to_string(),
+        fields: vec![Value::String(message)],
     }
 }
 
