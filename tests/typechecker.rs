@@ -43,6 +43,22 @@ fn import_of_unknown_module_fails() {
 }
 
 #[test]
+fn import_of_builtin_core_module_passes_without_workspace_sources() {
+    let src = "@a.main{:io=core.io;F main:()->i32!{io}={c(println,\"ok\");0};}";
+    let program = parse_str(src).expect("program should parse");
+    check_program(&program).expect("core.io import should be recognized");
+}
+
+#[test]
+fn import_of_unknown_builtin_core_module_fails() {
+    let src = "@a.main{:x=core.missing;F main:()->i32=0;}";
+    let program = parse_str(src).expect("program should parse");
+    let err = check_program(&program).expect_err("unknown core module should fail");
+    assert_eq!(err.code, TypeErrorCode::UnknownModule);
+    assert_eq!(err.code.as_str(), "E3002");
+}
+
+#[test]
 fn imports_validate_against_loaded_modules() {
     let main_src = "@main.app{:x=dep.mod;V n:i32=1;}";
     let dep_src = "@dep.mod{E[v];V v:i32=1;}";

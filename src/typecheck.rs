@@ -141,7 +141,7 @@ pub fn check_programs(programs: &[Program]) -> Result<(), TypeError> {
 }
 
 fn build_module_sigs(programs: &[Program]) -> Result<BTreeMap<String, ModuleSigs>, TypeError> {
-    let mut modules = BTreeMap::new();
+    let mut modules = builtin_module_sigs();
     for program in programs {
         let module_name = modid_to_string(&program.module.mod_id.parts);
         if modules.contains_key(&module_name) {
@@ -265,6 +265,29 @@ fn build_module_sigs(programs: &[Program]) -> Result<BTreeMap<String, ModuleSigs
     }
 
     Ok(modules)
+}
+
+fn builtin_module_sigs() -> BTreeMap<String, ModuleSigs> {
+    let mut modules = BTreeMap::new();
+    for module_name in [
+        "core.prelude",
+        "core.io",
+        "core.fs",
+        "core.json",
+        "core.proc",
+        "core.http",
+    ] {
+        modules.insert(
+            module_name.to_string(),
+            ModuleSigs {
+                values: BTreeMap::new(),
+                ctors: BTreeMap::new(),
+                exports: BTreeSet::new(),
+                imports: BTreeMap::new(),
+            },
+        );
+    }
+    modules
 }
 
 fn check_one_module(
