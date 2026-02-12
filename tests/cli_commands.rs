@@ -259,3 +259,57 @@ fn build_loads_nested_local_modules_for_import_validation() {
     let _ = fs::remove_dir(nested);
     let _ = fs::remove_dir(dir);
 }
+
+#[test]
+fn check_file_loads_local_modules_for_import_validation() {
+    let exe = env!("CARGO_BIN_EXE_muc");
+    let dir = unique_temp_dir("check_imports");
+    fs::create_dir_all(&dir).expect("temp dir should be created");
+    let dep = dir.join("dep.mu");
+    let main = dir.join("main.mu");
+    fs::write(&dep, "@dep.mod{E[v];V v:i32=1;}").expect("dep source should be written");
+    fs::write(&main, "@main.app{:d=dep.mod;F main:()->i32=0;}").expect("main source should be written");
+
+    let output = Command::new(exe)
+        .args(["check", main.to_str().expect("temp path should be valid utf8")])
+        .output()
+        .expect("binary should run");
+
+    assert!(
+        output.status.success(),
+        "check should load sibling modules for import validation: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let _ = fs::remove_file(dep);
+    let _ = fs::remove_file(main);
+    let _ = fs::remove_dir(dir);
+}
+
+#[test]
+fn check_file_loads_nested_local_modules_for_import_validation() {
+    let exe = env!("CARGO_BIN_EXE_muc");
+    let dir = unique_temp_dir("check_nested_imports");
+    let nested = dir.join("nested");
+    fs::create_dir_all(&nested).expect("nested temp dir should be created");
+    let dep = nested.join("dep.mu");
+    let main = dir.join("main.mu");
+    fs::write(&dep, "@dep.mod{E[v];V v:i32=1;}").expect("dep source should be written");
+    fs::write(&main, "@main.app{:d=dep.mod;F main:()->i32=0;}").expect("main source should be written");
+
+    let output = Command::new(exe)
+        .args(["check", main.to_str().expect("temp path should be valid utf8")])
+        .output()
+        .expect("binary should run");
+
+    assert!(
+        output.status.success(),
+        "check should load nested modules for import validation: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let _ = fs::remove_file(dep);
+    let _ = fs::remove_file(main);
+    let _ = fs::remove_dir(nested);
+    let _ = fs::remove_dir(dir);
+}

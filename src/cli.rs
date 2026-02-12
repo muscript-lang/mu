@@ -119,12 +119,15 @@ fn cmd_fmt(path: &Path, check: bool) -> Result<(), String> {
 }
 
 fn cmd_check(path: &Path) -> Result<(), String> {
-    let files = collect_mu_files(path)?;
-    if files.is_empty() {
-        return Err(format!("no .mu files found under {}", path.display()));
-    }
-
-    let loaded = load_programs(files)?;
+    let loaded = if path.is_file() {
+        load_entry_workspace(path)?
+    } else {
+        let files = collect_mu_files(path)?;
+        if files.is_empty() {
+            return Err(format!("no .mu files found under {}", path.display()));
+        }
+        load_programs(files)?
+    };
     check_loaded_modules(&loaded)?;
 
     println!("check ok");
