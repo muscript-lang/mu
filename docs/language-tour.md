@@ -71,3 +71,31 @@ Pure functions cannot call effectful operations:
 ```
 
 This is rejected with `E3007` because `print` requires `!{io}`.
+
+## Result and JSON flow
+
+`core.json.parse` returns a `Result` (`Ok` / `Er`) and can be matched directly:
+
+```mu
+@demo.json{
+T Json=Null|Bool(b)|Num(f64)|Str(s)|Arr(Json[])|Obj({s:Json});
+F main:()->i32!{io}=m(c(parse,"{\"mu\":1}")){
+Ok(j)=>{c(println,c(stringify,j));0};
+Er(e)=>{c(println,e);1};
+};
+}
+```
+
+## HTTP helper shape
+
+`core.http.get` is effect-gated with `!{net}` and returns `s!s`:
+
+```mu
+@demo.http{
+F fetch:(s)->s!s!{net}=m(c(get,arg0)){
+Ok(body)=>Ok(body);
+Er(msg)=>Er(msg);
+};
+F main:()->i32=0;
+}
+```
