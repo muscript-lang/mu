@@ -471,10 +471,7 @@ impl<'a> Lexer<'a> {
                 '\n' => {
                     return Err(LexError {
                         code: LexErrorCode::UnterminatedString,
-                        span: Span {
-                            start,
-                            end: idx,
-                        },
+                        span: Span { start, end: idx },
                         message: "unterminated string literal".to_string(),
                     });
                 }

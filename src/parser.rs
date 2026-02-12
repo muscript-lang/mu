@@ -172,7 +172,8 @@ impl Parser {
             self.bump();
             ctors.push(self.parse_ctor_decl()?);
         }
-        let end = self.expect_simple(TokenKind::Semicolon, "expected `;` after type declaration")?;
+        let end =
+            self.expect_simple(TokenKind::Semicolon, "expected `;` after type declaration")?;
         Ok(TypeDecl {
             name,
             params,
@@ -210,7 +211,8 @@ impl Parser {
         let ty = self.parse_type()?;
         self.expect_simple(TokenKind::Eq, "expected `=` after value type")?;
         let expr = self.parse_expr()?;
-        let end = self.expect_simple(TokenKind::Semicolon, "expected `;` after value declaration")?;
+        let end =
+            self.expect_simple(TokenKind::Semicolon, "expected `;` after value declaration")?;
         Ok(ValueDecl {
             name,
             ty,
@@ -231,8 +233,10 @@ impl Parser {
         let sig = self.parse_function_type()?;
         self.expect_simple(TokenKind::Eq, "expected `=` in function declaration")?;
         let expr = self.parse_expr()?;
-        let end =
-            self.expect_simple(TokenKind::Semicolon, "expected `;` after function declaration")?;
+        let end = self.expect_simple(
+            TokenKind::Semicolon,
+            "expected `;` after function declaration",
+        )?;
         Ok(FunctionDecl {
             name,
             type_params,
@@ -497,7 +501,8 @@ impl Parser {
         }
         let mut args = Vec::new();
         let mut span = name.span;
-        if self.at_simple(TokenKind::LBracket) && !self.lookahead_is_simple(1, TokenKind::RBracket) {
+        if self.at_simple(TokenKind::LBracket) && !self.lookahead_is_simple(1, TokenKind::RBracket)
+        {
             self.bump();
             args = self.parse_type_list()?;
             let close = self.expect_simple(TokenKind::RBracket, "expected `]` in type args")?;
@@ -847,7 +852,8 @@ impl Parser {
                     self.bump();
                     items.push(self.parse_pattern()?);
                 }
-                let close = self.expect_simple(TokenKind::RParen, "expected `)` in tuple pattern")?;
+                let close =
+                    self.expect_simple(TokenKind::RParen, "expected `)` in tuple pattern")?;
                 return Ok(Pattern::Tuple {
                     items,
                     span: open.span.merge(close.span),

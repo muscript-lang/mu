@@ -52,7 +52,8 @@ fn bytecode_runs_fs_write_and_read_calls() {
 
 #[test]
 fn bytecode_runs_json_parse_and_stringify_calls() {
-    let src = "@x.json{F main:()->i32={c(parse,\"{\\\"a\\\":1}\");c(stringify,\"{\\\"a\\\":1}\");0};}";
+    let src =
+        "@x.json{F main:()->i32={c(parse,\"{\\\"a\\\":1}\");c(stringify,\"{\\\"a\\\":1}\");0};}";
     let program = parse_str(src).expect("program should parse");
     let bc = compile(&program).expect("program should lower to bytecode");
     run_bytecode(&bc, &[]).expect("bytecode should run");

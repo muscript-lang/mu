@@ -294,7 +294,9 @@ fn format_expr(expr: &Expr, out: &mut String) {
             format_expr(else_branch, out);
             out.push(')');
         }
-        Expr::Match { scrutinee, arms, .. } => {
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
             out.push_str("m(");
             format_expr(scrutinee, out);
             out.push_str("){");

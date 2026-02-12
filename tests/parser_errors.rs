@@ -24,8 +24,7 @@ fn parse_invalid_expression_reports_stable_code() {
 
 #[test]
 fn parse_rejects_empty_type_param_list_in_type_decl() {
-    let err = parse_str("@m{T Box[]=Box(i32);}")
-        .expect_err("empty type param list should fail");
+    let err = parse_str("@m{T Box[]=Box(i32);}").expect_err("empty type param list should fail");
     assert_eq!(err.code, ParseErrorCode::ExpectedIdent);
     assert_eq!(err.code.as_str(), "E2003");
 }

@@ -94,8 +94,7 @@ fn cmd_fmt(path: &Path, check: bool) -> Result<(), String> {
     for file in files {
         let src = fs::read_to_string(&file)
             .map_err(|e| format!("failed reading {}: {e}", file.display()))?;
-        let formatted =
-            parse_and_format(&src).map_err(|e| format_parse_error(&file, &src, &e))?;
+        let formatted = parse_and_format(&src).map_err(|e| format_parse_error(&file, &src, &e))?;
 
         if src != formatted {
             if check {
@@ -250,7 +249,8 @@ fn check_loaded_modules(loaded: &[(PathBuf, String, Program)]) -> Result<(), Str
         .collect::<Vec<_>>();
     validate_modules(&programs).map_err(|e| format!("check failed: {e}"))?;
     for (file, src, program) in loaded {
-        check_program_with_modules(program, &programs).map_err(|e| format_type_error(file, src, &e))?;
+        check_program_with_modules(program, &programs)
+            .map_err(|e| format_type_error(file, src, &e))?;
     }
     Ok(())
 }

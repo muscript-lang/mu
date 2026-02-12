@@ -78,7 +78,10 @@ fn build_outputs_mub_magic() {
     );
 
     let bytes = fs::read(&out).expect("build output should be readable");
-    assert!(bytes.starts_with(b"MUB1"), "bytecode should start with MUB1");
+    assert!(
+        bytes.starts_with(b"MUB1"),
+        "bytecode should start with MUB1"
+    );
     let _ = fs::remove_file(out);
 }
 
@@ -90,7 +93,10 @@ fn run_command_executes_program() {
         .output()
         .expect("binary should run");
 
-    assert!(output.status.success(), "run should succeed with VM implemented");
+    assert!(
+        output.status.success(),
+        "run should succeed with VM implemented"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.is_empty(),
@@ -221,10 +227,14 @@ fn run_loads_local_modules_for_import_validation() {
     let dep = dir.join("dep.mu");
     let main = dir.join("main.mu");
     fs::write(&dep, "@dep.mod{E[v];V v:i32=1;}").expect("dep source should be written");
-    fs::write(&main, "@main.app{:d=dep.mod;F main:()->i32=0;}").expect("main source should be written");
+    fs::write(&main, "@main.app{:d=dep.mod;F main:()->i32=0;}")
+        .expect("main source should be written");
 
     let output = Command::new(exe)
-        .args(["run", main.to_str().expect("temp path should be valid utf8")])
+        .args([
+            "run",
+            main.to_str().expect("temp path should be valid utf8"),
+        ])
         .output()
         .expect("binary should run");
 
@@ -248,7 +258,8 @@ fn build_loads_local_modules_for_import_validation() {
     let main = dir.join("main.mu");
     let out = dir.join("main.mub");
     fs::write(&dep, "@dep.mod{E[v];V v:i32=1;}").expect("dep source should be written");
-    fs::write(&main, "@main.app{:d=dep.mod;F main:()->i32=0;}").expect("main source should be written");
+    fs::write(&main, "@main.app{:d=dep.mod;F main:()->i32=0;}")
+        .expect("main source should be written");
 
     let output = Command::new(exe)
         .args([
@@ -281,10 +292,14 @@ fn run_loads_nested_local_modules_for_import_validation() {
     let dep = nested.join("dep.mu");
     let main = dir.join("main.mu");
     fs::write(&dep, "@dep.mod{E[v];V v:i32=1;}").expect("dep source should be written");
-    fs::write(&main, "@main.app{:d=dep.mod;F main:()->i32=0;}").expect("main source should be written");
+    fs::write(&main, "@main.app{:d=dep.mod;F main:()->i32=0;}")
+        .expect("main source should be written");
 
     let output = Command::new(exe)
-        .args(["run", main.to_str().expect("temp path should be valid utf8")])
+        .args([
+            "run",
+            main.to_str().expect("temp path should be valid utf8"),
+        ])
         .output()
         .expect("binary should run");
 
@@ -310,7 +325,8 @@ fn build_loads_nested_local_modules_for_import_validation() {
     let main = dir.join("main.mu");
     let out = dir.join("main.mub");
     fs::write(&dep, "@dep.mod{E[v];V v:i32=1;}").expect("dep source should be written");
-    fs::write(&main, "@main.app{:d=dep.mod;F main:()->i32=0;}").expect("main source should be written");
+    fs::write(&main, "@main.app{:d=dep.mod;F main:()->i32=0;}")
+        .expect("main source should be written");
 
     let output = Command::new(exe)
         .args([
@@ -343,10 +359,14 @@ fn check_file_loads_local_modules_for_import_validation() {
     let dep = dir.join("dep.mu");
     let main = dir.join("main.mu");
     fs::write(&dep, "@dep.mod{E[v];V v:i32=1;}").expect("dep source should be written");
-    fs::write(&main, "@main.app{:d=dep.mod;F main:()->i32=0;}").expect("main source should be written");
+    fs::write(&main, "@main.app{:d=dep.mod;F main:()->i32=0;}")
+        .expect("main source should be written");
 
     let output = Command::new(exe)
-        .args(["check", main.to_str().expect("temp path should be valid utf8")])
+        .args([
+            "check",
+            main.to_str().expect("temp path should be valid utf8"),
+        ])
         .output()
         .expect("binary should run");
 
@@ -370,10 +390,14 @@ fn check_file_loads_nested_local_modules_for_import_validation() {
     let dep = nested.join("dep.mu");
     let main = dir.join("main.mu");
     fs::write(&dep, "@dep.mod{E[v];V v:i32=1;}").expect("dep source should be written");
-    fs::write(&main, "@main.app{:d=dep.mod;F main:()->i32=0;}").expect("main source should be written");
+    fs::write(&main, "@main.app{:d=dep.mod;F main:()->i32=0;}")
+        .expect("main source should be written");
 
     let output = Command::new(exe)
-        .args(["check", main.to_str().expect("temp path should be valid utf8")])
+        .args([
+            "check",
+            main.to_str().expect("temp path should be valid utf8"),
+        ])
         .output()
         .expect("binary should run");
 

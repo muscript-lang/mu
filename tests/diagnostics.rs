@@ -39,8 +39,7 @@ fn parse_errors_include_file_line_col_and_code() {
 fn type_errors_include_file_line_col_and_code() {
     let exe = env!("CARGO_BIN_EXE_muc");
     let path = unique_temp_file("bad_type");
-    fs::write(&path, "@m{F main:()->i32={c(print,\"x\");0};}")
-        .expect("should write fixture");
+    fs::write(&path, "@m{F main:()->i32={c(print,\"x\");0};}").expect("should write fixture");
 
     let output = Command::new(exe)
         .args(["check", path.to_str().expect("utf8 path")])
@@ -65,8 +64,7 @@ fn type_errors_include_file_line_col_and_code() {
 fn runtime_errors_include_stable_code() {
     let exe = env!("CARGO_BIN_EXE_muc");
     let path = unique_temp_file("bad_runtime");
-    fs::write(&path, "@m{F main:()->i32=c(/,1,0);}")
-        .expect("should write fixture");
+    fs::write(&path, "@m{F main:()->i32=c(/,1,0);}").expect("should write fixture");
 
     let output = Command::new(exe)
         .args(["run", path.to_str().expect("utf8 path")])

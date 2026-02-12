@@ -6,7 +6,11 @@ fn lexes_comments_and_escapes() {
     let tokens = tokenize(src).expect("source should lex");
     assert!(tokens.iter().any(|t| matches!(t.kind, TokenKind::At)));
     assert!(tokens.iter().any(|t| matches!(t.kind, TokenKind::Colon)));
-    assert!(tokens.iter().any(|t| matches!(t.kind, TokenKind::Semicolon)));
+    assert!(
+        tokens
+            .iter()
+            .any(|t| matches!(t.kind, TokenKind::Semicolon))
+    );
     assert!(
         tokens
             .iter()

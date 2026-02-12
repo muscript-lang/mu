@@ -168,7 +168,8 @@ fn build_module_sigs(programs: &[Program]) -> Result<BTreeMap<String, ModuleSigs
         for decl in &program.module.decls {
             match decl {
                 Decl::Import(d) => {
-                    let prev = imports.insert(d.alias.name.clone(), modid_to_string(&d.module.parts));
+                    let prev =
+                        imports.insert(d.alias.name.clone(), modid_to_string(&d.module.parts));
                     if prev.is_some() {
                         return Err(TypeError {
                             code: TypeErrorCode::DuplicateSymbol,
@@ -230,7 +231,12 @@ fn build_module_sigs(programs: &[Program]) -> Result<BTreeMap<String, ModuleSigs
                     values.insert(
                         d.name.name.clone(),
                         Type::Function {
-                            params: d.sig.params.iter().map(ast_type_to_type).collect::<Result<_, _>>()?,
+                            params: d
+                                .sig
+                                .params
+                                .iter()
+                                .map(ast_type_to_type)
+                                .collect::<Result<_, _>>()?,
                             ret: Box::new(ast_type_to_type(&d.sig.ret)?),
                             effects: d.sig.effects.clone(),
                         },
@@ -630,7 +636,11 @@ fn check_expr(ctx: &mut CheckCtx<'_>, expr: &Expr) -> Result<ExprCheck, TypeErro
                 effects: EffectSet::default(),
             })
         }
-        Expr::Match { scrutinee, arms, span } => {
+        Expr::Match {
+            scrutinee,
+            arms,
+            span,
+        } => {
             let scrut = check_expr(ctx, scrutinee)?;
             let mut arm_ty: Option<Type> = None;
             let mut effects = scrut.effects;
@@ -697,7 +707,11 @@ enum PatternCover {
     Other,
 }
 
-fn check_pattern(ctx: &mut CheckCtx<'_>, pat: &Pattern, expected: &Type) -> Result<PatternCover, TypeError> {
+fn check_pattern(
+    ctx: &mut CheckCtx<'_>,
+    pat: &Pattern,
+    expected: &Type,
+) -> Result<PatternCover, TypeError> {
     match pat {
         Pattern::Wildcard(_) => Ok(PatternCover::Wildcard),
         Pattern::Literal(Literal::Bool(v, span)) => {
@@ -881,7 +895,11 @@ fn resolve_name_type(ctx: &CheckCtx<'_>, name: &str, span: Span) -> Result<Type,
 
 fn function_type_to_type(sig: &FunctionType) -> Result<Type, TypeError> {
     Ok(Type::Function {
-        params: sig.params.iter().map(ast_type_to_type).collect::<Result<_, _>>()?,
+        params: sig
+            .params
+            .iter()
+            .map(ast_type_to_type)
+            .collect::<Result<_, _>>()?,
         ret: Box::new(ast_type_to_type(&sig.ret)?),
         effects: sig.effects.clone(),
     })
@@ -951,18 +969,27 @@ fn ast_type_to_type_with_vars(ty: &TypeExpr, vars: &HashMap<String, Type>) -> Ty
             }
             Type::Named(
                 name.name.clone(),
-                args.iter().map(|a| ast_type_to_type_with_vars(a, vars)).collect(),
+                args.iter()
+                    .map(|a| ast_type_to_type_with_vars(a, vars))
+                    .collect(),
             )
         }
-        TypeExpr::Optional { inner, .. } => Type::Optional(Box::new(ast_type_to_type_with_vars(inner, vars))),
-        TypeExpr::Array { inner, .. } => Type::Array(Box::new(ast_type_to_type_with_vars(inner, vars))),
+        TypeExpr::Optional { inner, .. } => {
+            Type::Optional(Box::new(ast_type_to_type_with_vars(inner, vars)))
+        }
+        TypeExpr::Array { inner, .. } => {
+            Type::Array(Box::new(ast_type_to_type_with_vars(inner, vars)))
+        }
         TypeExpr::Map { key, value, .. } => Type::Map(
             Box::new(ast_type_to_type_with_vars(key, vars)),
             Box::new(ast_type_to_type_with_vars(value, vars)),
         ),
-        TypeExpr::Tuple { items, .. } => {
-            Type::Tuple(items.iter().map(|i| ast_type_to_type_with_vars(i, vars)).collect())
-        }
+        TypeExpr::Tuple { items, .. } => Type::Tuple(
+            items
+                .iter()
+                .map(|i| ast_type_to_type_with_vars(i, vars))
+                .collect(),
+        ),
         TypeExpr::Function { sig, .. } => Type::Function {
             params: sig
                 .params
@@ -987,7 +1014,11 @@ fn expect_type(expected: &Type, got: &Type, span: Span) -> Result<(), TypeError>
     Err(TypeError {
         code: TypeErrorCode::TypeMismatch,
         span,
-        message: format!("type mismatch: expected {}, got {}", show_type(expected), show_type(got)),
+        message: format!(
+            "type mismatch: expected {}, got {}",
+            show_type(expected),
+            show_type(got)
+        ),
     })
 }
 
@@ -1022,8 +1053,7 @@ fn type_compatible(expected: &Type, got: &Type) -> bool {
                 effects: be,
             },
         ) if ap.len() == bp.len() && ae == be => {
-            ap.iter().zip(bp.iter()).all(|(x, y)| type_compatible(x, y))
-                && type_compatible(ar, br)
+            ap.iter().zip(bp.iter()).all(|(x, y)| type_compatible(x, y)) && type_compatible(ar, br)
         }
         (Type::Result(aok, aer), Type::Result(bok, ber)) => {
             type_compatible(aok, bok) && type_compatible(aer, ber)
@@ -1061,7 +1091,10 @@ fn show_type(ty: &Type) -> String {
         Type::Optional(inner) => format!("?{}", show_type(inner)),
         Type::Array(inner) => format!("{}[]", show_type(inner)),
         Type::Map(k, v) => format!("{{{}:{}}}", show_type(k), show_type(v)),
-        Type::Tuple(items) => format!("({})", items.iter().map(show_type).collect::<Vec<_>>().join(",")),
+        Type::Tuple(items) => format!(
+            "({})",
+            items.iter().map(show_type).collect::<Vec<_>>().join(",")
+        ),
         Type::Function {
             params,
             ret,
@@ -1205,10 +1238,7 @@ fn builtin_values() -> &'static BTreeMap<String, Type> {
             "read".to_string(),
             Type::Function {
                 params: vec![Type::String],
-                ret: Box::new(Type::Result(
-                    Box::new(Type::String),
-                    Box::new(Type::String),
-                )),
+                ret: Box::new(Type::Result(Box::new(Type::String), Box::new(Type::String))),
                 effects: EffectSet {
                     atoms: vec![EffectAtom::Fs],
                 },
@@ -1257,10 +1287,7 @@ fn builtin_values() -> &'static BTreeMap<String, Type> {
             "get".to_string(),
             Type::Function {
                 params: vec![Type::String],
-                ret: Box::new(Type::Result(
-                    Box::new(Type::String),
-                    Box::new(Type::String),
-                )),
+                ret: Box::new(Type::Result(Box::new(Type::String), Box::new(Type::String))),
                 effects: EffectSet {
                     atoms: vec![EffectAtom::Net],
                 },
