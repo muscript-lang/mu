@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use crate::ast::{Decl, Expr, FunctionDecl, Literal, Program};
+use crate::ast::{Decl, Expr, FunctionDecl, Literal, Pattern, Program};
 
 pub const MAGIC: &[u8; 4] = b"MUB1";
 
@@ -150,13 +150,59 @@ impl Lowerer {
                 self.code.push(builtin_id);
                 self.code.push(args.len() as u8);
             }
+            Expr::Match { scrutinee, arms, .. } => {
+                self.lower_expr(scrutinee)?;
+                let scrut_slot = self.alloc_local();
+                self.code.push(OpCode::StoreLocal as u8);
+                self.code.extend_from_slice(&scrut_slot.to_le_bytes());
+
+                let mut end_jumps = Vec::new();
+                for arm in arms {
+                    match &arm.pattern {
+                        Pattern::Wildcard(_) => {
+                            self.lower_expr(&arm.expr)?;
+                            let end_patch = self.emit_jump_placeholder(OpCode::Jump);
+                            end_jumps.push(end_patch);
+                        }
+                        Pattern::Literal(Literal::Bool(expected, _)) => {
+                            self.code.push(OpCode::LoadLocal as u8);
+                            self.code.extend_from_slice(&scrut_slot.to_le_bytes());
+                            if *expected {
+                                let next_patch = self.emit_jump_placeholder(OpCode::JumpIfFalse);
+                                self.lower_expr(&arm.expr)?;
+                                let end_patch = self.emit_jump_placeholder(OpCode::Jump);
+                                end_jumps.push(end_patch);
+                                self.patch_jump_to_current(next_patch);
+                            } else {
+                                let arm_patch = self.emit_jump_placeholder(OpCode::JumpIfFalse);
+                                let next_patch = self.emit_jump_placeholder(OpCode::Jump);
+                                self.patch_jump_to_current(arm_patch);
+                                self.lower_expr(&arm.expr)?;
+                                let end_patch = self.emit_jump_placeholder(OpCode::Jump);
+                                end_jumps.push(end_patch);
+                                self.patch_jump_to_current(next_patch);
+                            }
+                        }
+                        _ => {
+                            return Err(BytecodeError {
+                                message:
+                                    "only boolean and wildcard patterns are supported in bytecode lowering"
+                                        .to_string(),
+                            });
+                        }
+                    }
+                }
+                for patch in end_jumps {
+                    self.patch_jump_to_current(patch);
+                }
+            }
             Expr::Paren { inner, .. } => self.lower_expr(inner)?,
             Expr::Assert { .. }
             | Expr::Require { .. }
             | Expr::Ensure { .. }
             | Expr::NameApp { .. }
             | Expr::Lambda { .. }
-            | Expr::Match { .. } => {
+             => {
                 return Err(BytecodeError {
                     message: "expression form not supported by bytecode lowering yet".to_string(),
                 });
@@ -173,6 +219,24 @@ impl Lowerer {
         self.strings.push(s.to_string());
         self.string_ids.insert(s.to_string(), id);
         id
+    }
+
+    fn alloc_local(&mut self) -> u32 {
+        let slot = self.next_local;
+        self.next_local += 1;
+        slot
+    }
+
+    fn emit_jump_placeholder(&mut self, op: OpCode) -> usize {
+        self.code.push(op as u8);
+        let patch = self.code.len();
+        self.code.extend_from_slice(&0u32.to_le_bytes());
+        patch
+    }
+
+    fn patch_jump_to_current(&mut self, patch_pos: usize) {
+        let target = self.code.len() as u32;
+        self.code[patch_pos..patch_pos + 4].copy_from_slice(&target.to_le_bytes());
     }
 }
 

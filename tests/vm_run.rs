@@ -17,3 +17,19 @@ fn bytecode_requires_main_function() {
     let err = compile(&program).expect_err("missing main should fail");
     assert!(err.to_string().contains("missing `main` function"));
 }
+
+#[test]
+fn bytecode_runs_bool_match() {
+    let src = "@x.match{F main:()->i32=m(t){t=>0;f=>1;};}";
+    let program = parse_str(src).expect("program should parse");
+    let bc = compile(&program).expect("program should lower to bytecode");
+    run_bytecode(&bc, &[]).expect("bytecode should run");
+}
+
+#[test]
+fn bytecode_runs_bool_match_with_wildcard() {
+    let src = "@x.match2{F main:()->i32=m(f){t=>1;_=>0;};}";
+    let program = parse_str(src).expect("program should parse");
+    let bc = compile(&program).expect("program should lower to bytecode");
+    run_bytecode(&bc, &[]).expect("bytecode should run");
+}
