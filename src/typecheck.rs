@@ -409,6 +409,35 @@ fn check_expr(ctx: &mut CheckCtx<'_>, expr: &Expr) -> Result<ExprCheck, TypeErro
             effects: EffectSet::default(),
         }),
         Expr::NameApp { name, args, span } => {
+            if name.name == "Ok" || name.name == "Er" {
+                if args.len() != 1 {
+                    return Err(TypeError {
+                        code: TypeErrorCode::ArityMismatch,
+                        span: *span,
+                        message: format!(
+                            "constructor `{}` expects 1 args, got {}",
+                            name.name,
+                            args.len()
+                        ),
+                    });
+                }
+                let payload = check_expr(ctx, &args[0])?;
+                let ty = if name.name == "Ok" {
+                    Type::Result(
+                        Box::new(payload.ty.clone()),
+                        Box::new(Type::TypeVar("ResErr".to_string())),
+                    )
+                } else {
+                    Type::Result(
+                        Box::new(Type::TypeVar("ResOk".to_string())),
+                        Box::new(payload.ty.clone()),
+                    )
+                };
+                return Ok(ExprCheck {
+                    ty,
+                    effects: payload.effects,
+                });
+            }
             if let Some(ctor) = ctx.module.ctors.get(&name.name) {
                 let (fields, result_ty) = instantiate_ctor_sig(ctor);
                 if fields.len() != args.len() {

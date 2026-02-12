@@ -204,3 +204,11 @@ fn bytecode_json_parse_returns_json_adt_for_matching() {
     let bc = compile(&program).expect("program should lower to bytecode");
     run_bytecode(&bc, &[]).expect("parsed JSON object should match Obj constructor");
 }
+
+#[test]
+fn bytecode_runs_builtin_result_ctor_expression() {
+    let src = "@x.resctor{F main:()->i32=m(Ok(1)){Ok(v)=>0;Er(_)=>1;};}";
+    let program = parse_str(src).expect("program should parse");
+    let bc = compile(&program).expect("program should lower to bytecode");
+    run_bytecode(&bc, &[]).expect("builtin Ok ctor expression should lower and run");
+}

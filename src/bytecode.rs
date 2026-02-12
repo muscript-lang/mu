@@ -536,6 +536,8 @@ fn capture_plan(locals: &BTreeMap<String, u32>, params: &[Param]) -> Vec<String>
 
 fn collect_ctors(program: &Program) -> HashSet<String> {
     let mut set = HashSet::new();
+    set.insert("Ok".to_string());
+    set.insert("Er".to_string());
     for decl in &program.module.decls {
         if let Decl::Type(td) = decl {
             for ctor in &td.ctors {

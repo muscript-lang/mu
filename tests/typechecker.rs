@@ -242,6 +242,13 @@ fn result_match_must_be_exhaustive_without_wildcard() {
 }
 
 #[test]
+fn result_builtin_ctor_expressions_typecheck() {
+    let src = "@m.resctor{F main:()->i32=m(Ok(1)){Ok(x)=>x;Er(_)=>0;};}";
+    let program = parse_str(src).expect("program should parse");
+    check_program(&program).expect("builtin Ok ctor expression should typecheck");
+}
+
+#[test]
 fn duplicate_export_name_is_rejected() {
     let src = "@m.ex{E[x,x];V x:i32=0;F main:()->i32=0;}";
     let program = parse_str(src).expect("program should parse");
