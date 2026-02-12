@@ -1,2 +1,1 @@
-let xs = [1, 2, 3];
-sum(xs);
+@test.two{T Opt[A]=None|Some(A);V a:Opt[i32]=Some(1);}

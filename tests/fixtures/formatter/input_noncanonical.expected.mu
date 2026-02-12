@@ -1,2 +1,1 @@
-let x = [1, 2, 3];
-x + 1;
+@demo.main{E[main];F main:()->i32!{io}={c(print,"x");0};}

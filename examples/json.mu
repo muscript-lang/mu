@@ -1,2 +1,1 @@
-let sample = ["name", "mu", true, 1 + 2 * 3];
-sink(sample);
+@examples.json{V sample:s="mu";}
