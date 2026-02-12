@@ -106,6 +106,44 @@ fn json_parse_is_pure() {
 }
 
 #[test]
+fn net_effect_is_required_for_http_get() {
+    let src = "@m.net{F main:()->i32={c(get,\"https://example.com\");0};}";
+    let program = parse_str(src).expect("program should parse");
+    let err = check_program(&program).expect_err("missing net effect should fail");
+    assert_eq!(err.code, TypeErrorCode::EffectViolation);
+}
+
+#[test]
+fn net_effect_allows_http_get() {
+    let src = "@m.netok{F main:()->i32!{net}={c(get,\"https://example.com\");0};}";
+    let program = parse_str(src).expect("program should parse");
+    check_program(&program).expect("net effect should allow http get");
+}
+
+#[test]
+fn proc_effect_is_required_for_proc_run() {
+    let src = "@m.proc{F helper:(s[])->i32!s=c(run,\"echo\",arg0);F main:()->i32=0;}";
+    let program = parse_str(src).expect("program should parse");
+    let err = check_program(&program).expect_err("missing proc effect should fail");
+    assert_eq!(err.code, TypeErrorCode::EffectViolation);
+}
+
+#[test]
+fn proc_effect_allows_proc_run() {
+    let src = "@m.procok{F helper:(s[])->i32!s!{proc}=c(run,\"echo\",arg0);F main:()->i32=0;}";
+    let program = parse_str(src).expect("program should parse");
+    check_program(&program).expect("proc effect should allow run");
+}
+
+#[test]
+fn proc_run_rejects_non_array_args_type() {
+    let src = "@m.procbad{F main:()->i32!{proc}={c(run,\"echo\",\"oops\");0};}";
+    let program = parse_str(src).expect("program should parse");
+    let err = check_program(&program).expect_err("run expects array of strings");
+    assert_eq!(err.code, TypeErrorCode::TypeMismatch);
+}
+
+#[test]
 fn return_magic_is_allowed_inside_ensure() {
     let src = "@m.r1{F helper:()->b={_ _r;t};F main:()->i32=0;}";
     let program = parse_str(src).expect("program should parse");
