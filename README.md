@@ -33,10 +33,11 @@ cargo run -- check examples
 cargo run -- run examples/hello.mu
 ```
 
-You can also run the JSON roundtrip example:
+You can also run the JSON roundtrip and HTTP examples:
 
 ```bash
 cargo run -- run examples/json.mu
+cargo run -- run examples/http.mu
 ```
 
 5. Build bytecode:
@@ -49,6 +50,15 @@ cargo run -- build examples/hello.mu -o hello.mub
 
 ```bash
 cargo run -- run hello.mub
+```
+
+You can also build/run JSON and HTTP bytecode:
+
+```bash
+cargo run -- build examples/json.mu -o json.mub
+cargo run -- run json.mub
+cargo run -- build examples/http.mu -o http.mub
+cargo run -- run http.mub
 ```
 
 7. Run tests:
@@ -68,3 +78,14 @@ Example modules:
 - `examples/hello.mu`
 - `examples/json.mu`
 - `examples/http.mu`
+
+## CI Gates
+
+CI enforces:
+- `cargo fmt --all -- --check`
+- `cargo clippy --all-targets -- -D warnings`
+- `cargo test --all-targets`
+- `cargo run -- fmt --check .`
+- `cargo run -- check examples`
+- `cargo run -- run examples/{hello,json,http}.mu`
+- `cargo run -- build ...` and `cargo run -- run ...` for `hello/json/http` `.mub` artifacts
