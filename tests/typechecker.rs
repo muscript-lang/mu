@@ -264,6 +264,20 @@ fn result_builtin_ctor_expressions_typecheck() {
 }
 
 #[test]
+fn result_ok_ctor_expression_conforms_to_declared_result_type() {
+    let src = "@m.resdecl1{F lift_ok:(s)->s!s=Ok(arg0);F main:()->i32=0;}";
+    let program = parse_str(src).expect("program should parse");
+    check_program(&program).expect("Ok payload should satisfy declared result type");
+}
+
+#[test]
+fn result_er_ctor_expression_conforms_to_declared_result_type() {
+    let src = "@m.resdecl2{F lift_er:(s)->s!s=Er(arg0);F main:()->i32=0;}";
+    let program = parse_str(src).expect("program should parse");
+    check_program(&program).expect("Er payload should satisfy declared result type");
+}
+
+#[test]
 fn duplicate_export_name_is_rejected() {
     let src = "@m.ex{E[x,x];V x:i32=0;F main:()->i32=0;}";
     let program = parse_str(src).expect("program should parse");

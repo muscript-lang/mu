@@ -425,11 +425,11 @@ fn check_expr(ctx: &mut CheckCtx<'_>, expr: &Expr) -> Result<ExprCheck, TypeErro
                 let ty = if name.name == "Ok" {
                     Type::Result(
                         Box::new(payload.ty.clone()),
-                        Box::new(Type::TypeVar("ResErr".to_string())),
+                        Box::new(Type::TypeVar("__res_err".to_string())),
                     )
                 } else {
                     Type::Result(
-                        Box::new(Type::TypeVar("ResOk".to_string())),
+                        Box::new(Type::TypeVar("__res_ok".to_string())),
                         Box::new(payload.ty.clone()),
                     )
                 };
@@ -981,7 +981,7 @@ fn ast_type_to_type_with_vars(ty: &TypeExpr, vars: &HashMap<String, Type>) -> Ty
 }
 
 fn expect_type(expected: &Type, got: &Type, span: Span) -> Result<(), TypeError> {
-    if expected == got {
+    if type_compatible(expected, got) {
         return Ok(());
     }
     Err(TypeError {
@@ -989,6 +989,51 @@ fn expect_type(expected: &Type, got: &Type, span: Span) -> Result<(), TypeError>
         span,
         message: format!("type mismatch: expected {}, got {}", show_type(expected), show_type(got)),
     })
+}
+
+fn type_compatible(expected: &Type, got: &Type) -> bool {
+    if expected == got {
+        return true;
+    }
+    if matches_result_hole(expected) || matches_result_hole(got) {
+        return true;
+    }
+    match (expected, got) {
+        (Type::Named(a, aa), Type::Named(b, bb)) if a == b && aa.len() == bb.len() => {
+            aa.iter().zip(bb.iter()).all(|(x, y)| type_compatible(x, y))
+        }
+        (Type::Optional(a), Type::Optional(b)) => type_compatible(a, b),
+        (Type::Array(a), Type::Array(b)) => type_compatible(a, b),
+        (Type::Map(ak, av), Type::Map(bk, bv)) => {
+            type_compatible(ak, bk) && type_compatible(av, bv)
+        }
+        (Type::Tuple(a), Type::Tuple(b)) if a.len() == b.len() => {
+            a.iter().zip(b.iter()).all(|(x, y)| type_compatible(x, y))
+        }
+        (
+            Type::Function {
+                params: ap,
+                ret: ar,
+                effects: ae,
+            },
+            Type::Function {
+                params: bp,
+                ret: br,
+                effects: be,
+            },
+        ) if ap.len() == bp.len() && ae == be => {
+            ap.iter().zip(bp.iter()).all(|(x, y)| type_compatible(x, y))
+                && type_compatible(ar, br)
+        }
+        (Type::Result(aok, aer), Type::Result(bok, ber)) => {
+            type_compatible(aok, bok) && type_compatible(aer, ber)
+        }
+        _ => false,
+    }
+}
+
+fn matches_result_hole(ty: &Type) -> bool {
+    matches!(ty, Type::TypeVar(name) if name == "__res_ok" || name == "__res_err")
 }
 
 fn show_type(ty: &Type) -> String {
