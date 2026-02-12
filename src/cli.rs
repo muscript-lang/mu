@@ -9,7 +9,7 @@ use crate::parser::{ParseError, parse_str};
 use crate::typecheck::{TypeError, check_program, validate_modules};
 use crate::vm::run_bytecode;
 
-const HELP: &str = "muc - muScript compiler toolchain (v0.1 scaffold)\n\nUSAGE:\n  muc fmt <file|dir> [--check]\n  muc check <file|dir>\n  muc run <file.mu> [-- args...]\n  muc build <file.mu> -o <out.mub>\n";
+const HELP: &str = "muc - muScript compiler toolchain (v0.1)\n\nUSAGE:\n  muc fmt <file|dir> [--check]\n  muc check <file|dir>\n  muc run <file.mu> [-- args...]\n  muc build <file.mu> -o <out.mub>\n";
 
 pub fn run() -> Result<(), String> {
     let mut args: Vec<String> = env::args().collect();

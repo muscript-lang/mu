@@ -18,3 +18,7 @@ jobs:
         run: cargo test --all-targets
       - name: muc fmt check
         run: cargo run -- fmt --check .
+      - name: muc check examples
+        run: cargo run -- check examples
+      - name: muc run hello
+        run: cargo run -- run examples/hello.mu
