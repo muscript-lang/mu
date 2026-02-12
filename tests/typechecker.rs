@@ -88,3 +88,18 @@ fn json_parse_is_pure() {
     let program = parse_str(src).expect("program should parse");
     check_program(&program).expect("json parse should be pure");
 }
+
+#[test]
+fn return_magic_is_allowed_inside_ensure() {
+    let src = "@m.r1{F main:()->b={_ _r;t};}";
+    let program = parse_str(src).expect("program should parse");
+    check_program(&program).expect("_r should be available in ensure");
+}
+
+#[test]
+fn return_magic_is_rejected_outside_ensure() {
+    let src = "@m.r2{V x:b=_r;}";
+    let program = parse_str(src).expect("program should parse");
+    let err = check_program(&program).expect_err("_r outside ensure should fail");
+    assert_eq!(err.code.as_str(), "E3013");
+}

@@ -20,6 +20,7 @@ pub enum TypeErrorCode {
     DuplicateModule,
     DuplicateSymbol,
     InvalidEffectSet,
+    InvalidReturnMagic,
 }
 
 impl TypeErrorCode {
@@ -37,6 +38,7 @@ impl TypeErrorCode {
             TypeErrorCode::DuplicateModule => "E3010",
             TypeErrorCode::DuplicateSymbol => "E3011",
             TypeErrorCode::InvalidEffectSet => "E3012",
+            TypeErrorCode::InvalidReturnMagic => "E3013",
         }
     }
 }
@@ -108,6 +110,8 @@ struct CheckCtx<'a> {
     module_name: &'a str,
     module: &'a ModuleSigs,
     locals: HashMap<String, Type>,
+    return_type: Option<Type>,
+    allow_return_magic: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -262,6 +266,8 @@ fn check_one_module(
                     module_name,
                     module,
                     locals: HashMap::new(),
+                    return_type: None,
+                    allow_return_magic: false,
                 };
                 let got = check_expr(&mut ctx, &v.expr)?;
                 let expected = ast_type_to_type(&v.ty)?;
@@ -272,6 +278,8 @@ fn check_one_module(
                     module_name,
                     module,
                     locals: HashMap::new(),
+                    return_type: Some(ast_type_to_type(&f.sig.ret)?),
+                    allow_return_magic: false,
                 };
                 for (idx, param_ty) in f.sig.params.iter().enumerate() {
                     let param_name = format!("arg{idx}");
@@ -439,8 +447,20 @@ fn check_expr(ctx: &mut CheckCtx<'_>, expr: &Expr) -> Result<ExprCheck, TypeErro
                 effects,
             })
         }
-        Expr::Require { expr, .. } | Expr::Ensure { expr, .. } => {
-            let checked = check_expr(ctx, expr)?;
+        Expr::Require { expr, .. } => {
+            let mut nested = ctx.clone();
+            nested.allow_return_magic = false;
+            let checked = check_expr(&mut nested, expr)?;
+            expect_type(&Type::Bool, &checked.ty, expr.span())?;
+            Ok(ExprCheck {
+                ty: Type::Unit,
+                effects: checked.effects,
+            })
+        }
+        Expr::Ensure { expr, .. } => {
+            let mut nested = ctx.clone();
+            nested.allow_return_magic = true;
+            let checked = check_expr(&mut nested, expr)?;
             expect_type(&Type::Bool, &checked.ty, expr.span())?;
             Ok(ExprCheck {
                 ty: Type::Unit,
@@ -462,6 +482,8 @@ fn check_expr(ctx: &mut CheckCtx<'_>, expr: &Expr) -> Result<ExprCheck, TypeErro
                 nested.locals.insert(p.name.name.clone(), ty.clone());
                 param_types.push(ty);
             }
+            nested.return_type = Some(ast_type_to_type(ret)?);
+            nested.allow_return_magic = false;
             let body_checked = check_expr(&mut nested, body)?;
             let ret_ty = ast_type_to_type(ret)?;
             expect_type(&ret_ty, &body_checked.ty, body.span())?;
@@ -675,6 +697,23 @@ fn call_type(
 }
 
 fn resolve_name_type(ctx: &CheckCtx<'_>, name: &str, span: Span) -> Result<Type, TypeError> {
+    if name == "_r" {
+        if !ctx.allow_return_magic {
+            return Err(TypeError {
+                code: TypeErrorCode::InvalidReturnMagic,
+                span,
+                message: "`_r` is only valid inside ensure expressions".to_string(),
+            });
+        }
+        if let Some(ty) = &ctx.return_type {
+            return Ok(ty.clone());
+        }
+        return Err(TypeError {
+            code: TypeErrorCode::InvalidReturnMagic,
+            span,
+            message: "`_r` requires an enclosing function body".to_string(),
+        });
+    }
     if let Some(ty) = ctx.locals.get(name) {
         return Ok(ty.clone());
     }
