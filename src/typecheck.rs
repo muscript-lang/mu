@@ -679,6 +679,32 @@ fn check_pattern(ctx: &mut CheckCtx<'_>, pat: &Pattern, expected: &Type) -> Resu
             Ok(PatternCover::Other)
         }
         Pattern::Ctor { name, args, span } => {
+            if let Type::Result(ok_ty, err_ty) = expected {
+                let field_ty: &Type = match name.name.as_str() {
+                    "Ok" => ok_ty,
+                    "Er" => err_ty,
+                    _ => {
+                        return Err(TypeError {
+                            code: TypeErrorCode::InvalidPattern,
+                            span: name.span,
+                            message: format!("unknown constructor `{}`", name.name),
+                        });
+                    }
+                };
+                if args.len() != 1 {
+                    return Err(TypeError {
+                        code: TypeErrorCode::ArityMismatch,
+                        span: *span,
+                        message: format!(
+                            "constructor `{}` pattern expects 1 args, got {}",
+                            name.name,
+                            args.len()
+                        ),
+                    });
+                }
+                check_pattern(ctx, &args[0], field_ty)?;
+                return Ok(PatternCover::Ctor(name.name.clone()));
+            }
             let ctor = ctx.module.ctors.get(&name.name).ok_or_else(|| TypeError {
                 code: TypeErrorCode::InvalidPattern,
                 span: name.span,
@@ -826,16 +852,24 @@ fn instantiate_ctor_sig(sig: &CtorSig) -> (Vec<Type>, Type) {
 }
 
 fn adt_constructor_names(ctx: &CheckCtx<'_>, ty: &Type) -> Option<BTreeSet<String>> {
-    let Type::Named(name, _) = ty else {
-        return None;
-    };
-    let mut out = BTreeSet::new();
-    for (ctor, sig) in &ctx.module.ctors {
-        if &sig.parent == name {
-            out.insert(ctor.clone());
+    match ty {
+        Type::Result(_, _) => {
+            let mut out = BTreeSet::new();
+            out.insert("Ok".to_string());
+            out.insert("Er".to_string());
+            Some(out)
         }
+        Type::Named(name, _) => {
+            let mut out = BTreeSet::new();
+            for (ctor, sig) in &ctx.module.ctors {
+                if &sig.parent == name {
+                    out.insert(ctor.clone());
+                }
+            }
+            if out.is_empty() { None } else { Some(out) }
+        }
+        _ => None,
     }
-    if out.is_empty() { None } else { Some(out) }
 }
 
 fn ast_type_to_type(ty: &TypeExpr) -> Result<Type, TypeError> {

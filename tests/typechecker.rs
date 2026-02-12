@@ -227,6 +227,21 @@ fn prelude_len_rejects_non_string() {
 }
 
 #[test]
+fn result_builtin_patterns_typecheck_without_user_declared_res() {
+    let src = "@m.resok{F main:()->i32=m(c(parse,\"{}\")){Ok(j)=>0;Er(e)=>1;};}";
+    let program = parse_str(src).expect("program should parse");
+    check_program(&program).expect("builtin Ok/Er result patterns should typecheck");
+}
+
+#[test]
+fn result_match_must_be_exhaustive_without_wildcard() {
+    let src = "@m.resbad{F main:()->i32=m(c(parse,\"{}\")){Ok(j)=>0;};}";
+    let program = parse_str(src).expect("program should parse");
+    let err = check_program(&program).expect_err("non-exhaustive result match should fail");
+    assert_eq!(err.code, TypeErrorCode::NonExhaustiveMatch);
+}
+
+#[test]
 fn duplicate_export_name_is_rejected() {
     let src = "@m.ex{E[x,x];V x:i32=0;F main:()->i32=0;}";
     let program = parse_str(src).expect("program should parse");
