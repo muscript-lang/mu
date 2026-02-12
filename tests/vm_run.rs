@@ -212,3 +212,19 @@ fn bytecode_runs_builtin_result_ctor_expression() {
     let bc = compile(&program).expect("program should lower to bytecode");
     run_bytecode(&bc, &[]).expect("builtin Ok ctor expression should lower and run");
 }
+
+#[test]
+fn bytecode_runs_string_equality() {
+    let src = "@x.eqs{F main:()->i32={a(c(==,\"mu\",\"mu\"));0};}";
+    let program = parse_str(src).expect("program should parse");
+    let bc = compile(&program).expect("program should lower to bytecode");
+    run_bytecode(&bc, &[]).expect("string equality should run");
+}
+
+#[test]
+fn bytecode_runs_structural_equality_for_parsed_json_results() {
+    let src = "@x.eqj{F main:()->i32={a(c(==,c(parse,\"{\\\"a\\\":1}\"),c(parse,\"{\\\"a\\\":1}\")));0};}";
+    let program = parse_str(src).expect("program should parse");
+    let bc = compile(&program).expect("program should lower to bytecode");
+    run_bytecode(&bc, &[]).expect("parsed JSON results should compare structurally");
+}

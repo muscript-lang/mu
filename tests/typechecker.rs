@@ -227,6 +227,21 @@ fn prelude_len_rejects_non_string() {
 }
 
 #[test]
+fn equality_typechecks_for_strings() {
+    let src = "@m.eqs{F main:()->i32={a(c(==,\"x\",\"x\"));0};}";
+    let program = parse_str(src).expect("program should parse");
+    check_program(&program).expect("string equality should typecheck");
+}
+
+#[test]
+fn equality_rejects_mismatched_operand_types() {
+    let src = "@m.eqbad{F main:()->i32={a(c(==,\"x\",1));0};}";
+    let program = parse_str(src).expect("program should parse");
+    let err = check_program(&program).expect_err("mismatched equality operands should fail");
+    assert_eq!(err.code, TypeErrorCode::TypeMismatch);
+}
+
+#[test]
 fn result_builtin_patterns_typecheck_without_user_declared_res() {
     let src = "@m.resok{F main:()->i32=m(c(parse,\"{}\")){Ok(j)=>0;Er(e)=>1;};}";
     let program = parse_str(src).expect("program should parse");

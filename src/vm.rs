@@ -660,12 +660,20 @@ fn call_builtin(id: u8, args: &[Value]) -> Result<Value, VmError> {
             Ok(Value::Int(a % b))
         }
         25 => {
-            let (a, b) = int2(args, "==")?;
-            Ok(Value::Bool(a == b))
+            if args.len() != 2 {
+                return Err(VmError {
+                    message: "== expects two arguments".to_string(),
+                });
+            }
+            Ok(Value::Bool(args[0] == args[1]))
         }
         26 => {
-            let (a, b) = int2(args, "!=")?;
-            Ok(Value::Bool(a != b))
+            if args.len() != 2 {
+                return Err(VmError {
+                    message: "!= expects two arguments".to_string(),
+                });
+            }
+            Ok(Value::Bool(args[0] != args[1]))
         }
         27 => {
             let (a, b) = int2(args, "<")?;

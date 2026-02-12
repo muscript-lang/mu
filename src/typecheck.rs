@@ -467,6 +467,31 @@ fn check_expr(ctx: &mut CheckCtx<'_>, expr: &Expr) -> Result<ExprCheck, TypeErro
             call_type(ctx, callee_ty, args, *span)
         }
         Expr::Call { callee, args, span } => {
+            if let Expr::Name(name) = &**callee {
+                if name.name == "==" || name.name == "!=" {
+                    if args.len() != 2 {
+                        return Err(TypeError {
+                            code: TypeErrorCode::ArityMismatch,
+                            span: *span,
+                            message: format!("call expects 2 args, got {}", args.len()),
+                        });
+                    }
+                    let left = check_expr(ctx, &args[0])?;
+                    let right = check_expr(ctx, &args[1])?;
+                    expect_type(&left.ty, &right.ty, args[1].span())?;
+                    if matches!(left.ty, Type::Function { .. }) {
+                        return Err(TypeError {
+                            code: TypeErrorCode::TypeMismatch,
+                            span: *span,
+                            message: "equality does not support function values".to_string(),
+                        });
+                    }
+                    return Ok(ExprCheck {
+                        ty: Type::Bool,
+                        effects: union_effects(&left.effects, &right.effects),
+                    });
+                }
+            }
             let callee_checked = check_expr(ctx, callee)?;
             let call = call_type(ctx, callee_checked.ty, args, *span)?;
             Ok(ExprCheck {
