@@ -36,6 +36,7 @@ pub enum OpCode {
     JumpIfTag = 13,
     AssertConst = 14,
     AssertDyn = 15,
+    GetAdtField = 16,
 }
 
 #[derive(Default)]
@@ -192,20 +193,44 @@ impl Lowerer {
                             }
                         }
                         Pattern::Ctor { name, args, .. } => {
-                            if !args.is_empty() {
-                                return Err(BytecodeError {
-                                    message:
-                                        "only nullary constructor patterns are supported in bytecode lowering"
-                                            .to_string(),
-                                });
-                            }
                             let tag_id = self.intern_string(&name.name);
                             self.code.push(OpCode::LoadLocal as u8);
                             self.code.extend_from_slice(&scrut_slot.to_le_bytes());
                             let arm_patch = self.emit_jump_if_tag_placeholder(tag_id);
                             let next_patch = self.emit_jump_placeholder(OpCode::Jump);
                             self.patch_jump_to_current(arm_patch);
+                            let mut bound: Vec<(String, Option<u32>)> = Vec::new();
+                            for (idx, arg_pat) in args.iter().enumerate() {
+                                match arg_pat {
+                                    Pattern::Name(id) => {
+                                        self.code.push(OpCode::LoadLocal as u8);
+                                        self.code.extend_from_slice(&scrut_slot.to_le_bytes());
+                                        self.code.push(OpCode::GetAdtField as u8);
+                                        self.code.push(idx as u8);
+                                        let slot = self.alloc_local();
+                                        self.code.push(OpCode::StoreLocal as u8);
+                                        self.code.extend_from_slice(&slot.to_le_bytes());
+                                        let prev = self.locals.insert(id.name.clone(), slot);
+                                        bound.push((id.name.clone(), prev));
+                                    }
+                                    Pattern::Wildcard(_) => {}
+                                    _ => {
+                                        return Err(BytecodeError {
+                                            message:
+                                                "only identifier and wildcard constructor field patterns are supported in bytecode lowering"
+                                                    .to_string(),
+                                        });
+                                    }
+                                }
+                            }
                             self.lower_expr(&arm.expr)?;
+                            for (name, prev) in bound.into_iter().rev() {
+                                if let Some(old_slot) = prev {
+                                    self.locals.insert(name, old_slot);
+                                } else {
+                                    self.locals.remove(&name);
+                                }
+                            }
                             let end_patch = self.emit_jump_placeholder(OpCode::Jump);
                             end_jumps.push(end_patch);
                             self.patch_jump_to_current(next_patch);

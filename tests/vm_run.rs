@@ -82,3 +82,19 @@ fn bytecode_runs_require_and_ensure_true() {
     let bc = compile(&program).expect("program should lower to bytecode");
     run_bytecode(&bc, &[]).expect("contracts should run");
 }
+
+#[test]
+fn bytecode_runs_ctor_match_with_field_binding() {
+    let src = "@x.adt2{T Opt[A]=None|Some(A);F main:()->i32=m(Some(0)){Some(x)=>x;None()=>1;};}";
+    let program = parse_str(src).expect("program should parse");
+    let bc = compile(&program).expect("program should lower to bytecode");
+    run_bytecode(&bc, &[]).expect("ADT field binding should run");
+}
+
+#[test]
+fn bytecode_runs_ctor_match_with_wildcard_field() {
+    let src = "@x.adt3{T Opt[A]=None|Some(A);F main:()->i32=m(Some(1)){Some(_)=>0;None()=>1;};}";
+    let program = parse_str(src).expect("program should parse");
+    let bc = compile(&program).expect("program should lower to bytecode");
+    run_bytecode(&bc, &[]).expect("ADT wildcard field pattern should run");
+}

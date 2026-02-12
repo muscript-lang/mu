@@ -219,6 +219,21 @@ pub fn run_bytecode(bytecode: &[u8], _args: &[String]) -> Result<(), VmError> {
                 }
                 stack.push(Value::Unit);
             }
+            x if x == OpCode::GetAdtField as u8 => {
+                let idx = read_u8(code, &mut ip)? as usize;
+                let value = stack.pop().ok_or_else(|| VmError {
+                    message: "stack underflow in GET_ADT_FIELD".to_string(),
+                })?;
+                let Value::Adt { fields, .. } = value else {
+                    return Err(VmError {
+                        message: "GET_ADT_FIELD expects an ADT value".to_string(),
+                    });
+                };
+                let field = fields.get(idx).ok_or_else(|| VmError {
+                    message: "adt field index out of bounds".to_string(),
+                })?;
+                stack.push(field.clone());
+            }
             x if x == OpCode::Return as u8 => {
                 let ret = stack.pop().ok_or_else(|| VmError {
                     message: "stack underflow in RET".to_string(),
