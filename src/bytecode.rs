@@ -314,10 +314,35 @@ impl<'a> Lowerer<'a> {
                             end_jumps.push(end_patch);
                             self.patch_jump_to_current(next_patch);
                         }
+                        Pattern::Name(id) => {
+                            if self.ctx.ctor_names.contains(&id.name) {
+                                let tag_id = self.intern_string(&id.name);
+                                self.code.push(OpCode::LoadLocal as u8);
+                                self.code.extend_from_slice(&scrut_slot.to_le_bytes());
+                                let arm_patch = self.emit_jump_if_tag_placeholder(tag_id);
+                                let next_patch = self.emit_jump_placeholder(OpCode::Jump);
+                                self.patch_jump_to_current(arm_patch);
+                                self.lower_expr(&arm.expr)?;
+                                let end_patch = self.emit_jump_placeholder(OpCode::Jump);
+                                end_jumps.push(end_patch);
+                                self.patch_jump_to_current(next_patch);
+                            } else {
+                                self.code.push(OpCode::LoadLocal as u8);
+                                self.code.extend_from_slice(&scrut_slot.to_le_bytes());
+                                let slot = self.alloc_local();
+                                self.code.push(OpCode::StoreLocal as u8);
+                                self.code.extend_from_slice(&slot.to_le_bytes());
+                                let prev = self.locals.insert(id.name.clone(), slot);
+                                self.lower_expr(&arm.expr)?;
+                                restore_local(&mut self.locals, &id.name, prev);
+                                let end_patch = self.emit_jump_placeholder(OpCode::Jump);
+                                end_jumps.push(end_patch);
+                            }
+                        }
                         _ => {
                             return Err(BytecodeError {
                                 message:
-                                    "only boolean and constructor/wildcard patterns are supported in bytecode lowering"
+                                    "only boolean, constructor, name, and wildcard patterns are supported in bytecode lowering"
                                         .to_string(),
                             });
                         }

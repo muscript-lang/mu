@@ -122,3 +122,19 @@ fn bytecode_runs_capturing_lambda_call() {
     let bc = compile(&program).expect("program should lower to bytecode");
     run_bytecode(&bc, &[]).expect("capturing lambda call should run");
 }
+
+#[test]
+fn bytecode_runs_name_pattern_as_nullary_ctor() {
+    let src = "@x.p1{T Opt[A]=None|Some(A);F main:()->i32=m(None()){None=>0;_=>1;};}";
+    let program = parse_str(src).expect("program should parse");
+    let bc = compile(&program).expect("program should lower to bytecode");
+    run_bytecode(&bc, &[]).expect("nullary ctor name pattern should run");
+}
+
+#[test]
+fn bytecode_runs_name_pattern_as_binding() {
+    let src = "@x.p2{F main:()->i32=m(0){x=>x;};}";
+    let program = parse_str(src).expect("program should parse");
+    let bc = compile(&program).expect("program should lower to bytecode");
+    run_bytecode(&bc, &[]).expect("binding name pattern should run");
+}
