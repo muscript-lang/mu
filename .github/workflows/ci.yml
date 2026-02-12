@@ -24,6 +24,8 @@ jobs:
         run: cargo run -- run examples/hello.mu
       - name: muc run json
         run: cargo run -- run examples/json.mu
+      - name: muc run http
+        run: cargo run -- run examples/http.mu
       - name: muc build hello.mub
         run: cargo run -- build examples/hello.mu -o hello.mub
       - name: muc run hello.mub
@@ -32,3 +34,7 @@ jobs:
         run: cargo run -- build examples/json.mu -o json.mub
       - name: muc run json.mub
         run: cargo run -- run json.mub
+      - name: muc build http.mub
+        run: cargo run -- build examples/http.mu -o http.mub
+      - name: muc run http.mub
+        run: cargo run -- run http.mub

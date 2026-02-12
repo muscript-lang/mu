@@ -119,6 +119,21 @@ fn run_command_executes_json_example() {
 }
 
 #[test]
+fn run_command_executes_http_example() {
+    let exe = env!("CARGO_BIN_EXE_muc");
+    let output = Command::new(exe)
+        .args(["run", "examples/http.mu"])
+        .output()
+        .expect("binary should run");
+
+    assert!(
+        output.status.success(),
+        "run should succeed for http example: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn run_command_executes_built_mub() {
     let exe = env!("CARGO_BIN_EXE_muc");
     let out = unique_temp_mub_file("hello_run");
@@ -139,6 +154,31 @@ fn run_command_executes_built_mub() {
         .output()
         .expect("binary should run");
     assert!(run.status.success(), "run on .mub should succeed");
+
+    let _ = fs::remove_file(out);
+}
+
+#[test]
+fn run_command_executes_built_http_mub() {
+    let exe = env!("CARGO_BIN_EXE_muc");
+    let out = unique_temp_mub_file("http_run");
+
+    let build = Command::new(exe)
+        .args([
+            "build",
+            "examples/http.mu",
+            "-o",
+            out.to_str().expect("temp path should be valid utf8"),
+        ])
+        .output()
+        .expect("binary should run");
+    assert!(build.status.success(), "http build should succeed");
+
+    let run = Command::new(exe)
+        .args(["run", out.to_str().expect("temp path should be valid utf8")])
+        .output()
+        .expect("binary should run");
+    assert!(run.status.success(), "run on http .mub should succeed");
 
     let _ = fs::remove_file(out);
 }
