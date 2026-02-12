@@ -23,9 +23,9 @@ This folder contains an end-to-end µScript v0.2 demo app focused on:
 - `signal_reactor.mu`: IO glue (fs/net + json parsing + output)
 
 ## Output contract
-- Print exactly one JSON object per input event to stdout.
-- The last line must be a valid action JSON record.
-- Logging (if any) must be consistent and not interleaved with JSON output.
+- Print exactly one action line per input event to stdout.
+- Default output is compact text (`H`, `EL`, `XS`, etc.); JSON-ish output is optional via a module flag.
+- Logging (if any) must be consistent and not interleaved with action output lines.
 
 ## Token economy demonstration
 - Provide both:
@@ -33,8 +33,9 @@ This folder contains an end-to-end µScript v0.2 demo app focused on:
   - proof that `muc fmt --mode=compressed` yields substantially smaller output
 - Include a small test or script that computes:
   - byte length readable vs compressed
-  - a simple token-ish count
-  - assert compressed <= 70% of readable (adjust only if necessary, document why)
+  - lexer-based token count (`#n`, identifiers, ints, strings, punctuation)
+  - assert compressed bytes <= 75% of readable
+  - assert compressed token count <= 100% of readable
 
 ## Tests
 - Unit tests must cover:

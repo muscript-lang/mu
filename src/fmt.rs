@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -66,96 +66,119 @@ pub fn format_program_mode(program: &Program, mode: FmtMode) -> String {
 }
 
 fn build_compressed_symtab(module: &Module) -> Vec<String> {
-    let mut names = BTreeSet::new();
+    let mut eligible = BTreeSet::new();
     for decl in &module.decls {
-        collect_decl_names(decl, module, &mut names);
+        collect_decl_bindings(decl, module, &mut eligible);
     }
-    names.into_iter().collect()
+    let mut counts = BTreeMap::new();
+    for decl in &module.decls {
+        count_decl_names(decl, module, &eligible, &mut counts);
+    }
+    let mut ranked = counts.into_iter().collect::<Vec<_>>();
+    ranked.sort_by(|(name_a, count_a), (name_b, count_b)| {
+        count_b.cmp(count_a).then_with(|| name_a.cmp(name_b))
+    });
+    let mut selected = Vec::new();
+    for (name, count) in ranked {
+        let index = selected.len();
+        let index_width = digit_count(index);
+        let replacement_gain =
+            (count as isize) * (name.len() as isize - (1 + index_width) as isize);
+        let table_cost = name.len() as isize + if selected.is_empty() { 0 } else { 1 };
+        if replacement_gain > table_cost {
+            selected.push(name);
+        }
+    }
+    selected
 }
 
-fn collect_decl_names(decl: &Decl, module: &Module, out: &mut BTreeSet<String>) {
+fn digit_count(n: usize) -> usize {
+    n.to_string().len()
+}
+
+fn collect_decl_bindings(decl: &Decl, module: &Module, out: &mut BTreeSet<String>) {
     match decl {
         Decl::Import(d) => {
-            collect_ident(&d.alias, module, out);
+            collect_binding_ident(&d.alias, module, out);
         }
         Decl::Export(d) => {
             for name in &d.names {
-                collect_ident(name, module, out);
+                collect_binding_ident(name, module, out);
             }
         }
         Decl::Type(d) => {
-            collect_ident(&d.name, module, out);
+            collect_binding_ident(&d.name, module, out);
             for p in &d.params {
-                collect_ident(p, module, out);
+                collect_binding_ident(p, module, out);
             }
             for ctor in &d.ctors {
-                collect_ident(&ctor.name, module, out);
+                collect_binding_ident(&ctor.name, module, out);
                 for field in &ctor.fields {
-                    collect_type_names(field, module, out);
+                    collect_type_bindings(field, module, out);
                 }
             }
         }
         Decl::Value(d) => {
-            collect_ident(&d.name, module, out);
-            collect_type_names(&d.ty, module, out);
-            collect_expr_names(&d.expr, module, out);
+            collect_binding_ident(&d.name, module, out);
+            collect_type_bindings(&d.ty, module, out);
+            collect_expr_bindings(&d.expr, module, out);
         }
         Decl::Function(d) => {
-            collect_ident(&d.name, module, out);
+            collect_binding_ident(&d.name, module, out);
             for tp in &d.type_params {
-                collect_ident(tp, module, out);
+                collect_binding_ident(tp, module, out);
             }
-            collect_function_type_names(&d.sig, module, out);
-            collect_expr_names(&d.expr, module, out);
+            collect_function_type_bindings(&d.sig, module, out);
+            collect_expr_bindings(&d.expr, module, out);
         }
     }
 }
 
-fn collect_function_type_names(sig: &FunctionType, module: &Module, out: &mut BTreeSet<String>) {
+fn collect_function_type_bindings(sig: &FunctionType, module: &Module, out: &mut BTreeSet<String>) {
     for p in &sig.params {
-        collect_type_names(p, module, out);
+        collect_type_bindings(p, module, out);
     }
-    collect_type_names(&sig.ret, module, out);
+    collect_type_bindings(&sig.ret, module, out);
 }
 
-fn collect_type_names(ty: &TypeExpr, module: &Module, out: &mut BTreeSet<String>) {
+fn collect_type_bindings(ty: &TypeExpr, module: &Module, out: &mut BTreeSet<String>) {
     match ty {
         TypeExpr::Prim(_, _) => {}
         TypeExpr::Named { name, args, .. } => {
-            collect_ident(name, module, out);
+            collect_binding_ident(name, module, out);
             for arg in args {
-                collect_type_names(arg, module, out);
+                collect_type_bindings(arg, module, out);
             }
         }
         TypeExpr::Optional { inner, .. }
         | TypeExpr::Array { inner, .. }
         | TypeExpr::Group { inner, .. } => {
-            collect_type_names(inner, module, out);
+            collect_type_bindings(inner, module, out);
         }
         TypeExpr::Map { key, value, .. } => {
-            collect_type_names(key, module, out);
-            collect_type_names(value, module, out);
+            collect_type_bindings(key, module, out);
+            collect_type_bindings(value, module, out);
         }
         TypeExpr::Tuple { items, .. } => {
             for item in items {
-                collect_type_names(item, module, out);
+                collect_type_bindings(item, module, out);
             }
         }
-        TypeExpr::Function { sig, .. } => collect_function_type_names(sig, module, out),
+        TypeExpr::Function { sig, .. } => collect_function_type_bindings(sig, module, out),
         TypeExpr::ResultSugar { ok, err, .. } => {
-            collect_type_names(ok, module, out);
-            collect_type_names(err, module, out);
+            collect_type_bindings(ok, module, out);
+            collect_type_bindings(err, module, out);
         }
     }
 }
 
-fn collect_expr_names(expr: &Expr, module: &Module, out: &mut BTreeSet<String>) {
+fn collect_expr_bindings(expr: &Expr, module: &Module, out: &mut BTreeSet<String>) {
     match expr {
         Expr::Block { prefix, tail, .. } => {
             for e in prefix {
-                collect_expr_names(e, module, out);
+                collect_expr_bindings(e, module, out);
             }
-            collect_expr_names(tail, module, out);
+            collect_expr_bindings(tail, module, out);
         }
         Expr::Unit(_) | Expr::Literal(_) => {}
         Expr::Let {
@@ -165,12 +188,12 @@ fn collect_expr_names(expr: &Expr, module: &Module, out: &mut BTreeSet<String>) 
             body,
             ..
         } => {
-            collect_ident(name, module, out);
+            collect_binding_ident(name, module, out);
             if let Some(ty) = ty {
-                collect_type_names(ty, module, out);
+                collect_type_bindings(ty, module, out);
             }
-            collect_expr_names(value, module, out);
-            collect_expr_names(body, module, out);
+            collect_expr_bindings(value, module, out);
+            collect_expr_bindings(body, module, out);
         }
         Expr::If {
             cond,
@@ -178,79 +201,300 @@ fn collect_expr_names(expr: &Expr, module: &Module, out: &mut BTreeSet<String>) 
             else_branch,
             ..
         } => {
-            collect_expr_names(cond, module, out);
-            collect_expr_names(then_branch, module, out);
-            collect_expr_names(else_branch, module, out);
+            collect_expr_bindings(cond, module, out);
+            collect_expr_bindings(then_branch, module, out);
+            collect_expr_bindings(else_branch, module, out);
         }
         Expr::Match {
             scrutinee, arms, ..
         } => {
-            collect_expr_names(scrutinee, module, out);
+            collect_expr_bindings(scrutinee, module, out);
             for arm in arms {
-                collect_pattern_names(&arm.pattern, module, out);
-                collect_expr_names(&arm.expr, module, out);
+                collect_pattern_bindings(&arm.pattern, module, out);
+                collect_expr_bindings(&arm.expr, module, out);
             }
         }
         Expr::Call { callee, args, .. } => {
-            collect_expr_names(callee, module, out);
+            collect_expr_bindings(callee, module, out);
             for arg in args {
-                collect_expr_names(arg, module, out);
+                collect_expr_bindings(arg, module, out);
             }
         }
         Expr::Lambda {
             params, ret, body, ..
         } => {
             for p in params {
-                collect_ident(&p.name, module, out);
-                collect_type_names(&p.ty, module, out);
+                collect_binding_ident(&p.name, module, out);
+                collect_type_bindings(&p.ty, module, out);
             }
-            collect_type_names(ret, module, out);
-            collect_expr_names(body, module, out);
+            collect_type_bindings(ret, module, out);
+            collect_expr_bindings(body, module, out);
         }
         Expr::Assert { cond, msg, .. } => {
-            collect_expr_names(cond, module, out);
+            collect_expr_bindings(cond, module, out);
             if let Some(msg) = msg {
-                collect_expr_names(msg, module, out);
+                collect_expr_bindings(msg, module, out);
             }
         }
         Expr::Require { expr, .. }
         | Expr::Ensure { expr, .. }
         | Expr::Paren { inner: expr, .. } => {
-            collect_expr_names(expr, module, out);
+            collect_expr_bindings(expr, module, out);
         }
-        Expr::Name(name) => collect_ident(name, module, out),
+        Expr::Name(_) => {}
         Expr::NameApp { name, args, .. } => {
-            collect_ident(name, module, out);
+            collect_binding_ident(name, module, out);
             for arg in args {
-                collect_expr_names(arg, module, out);
+                collect_expr_bindings(arg, module, out);
             }
         }
     }
 }
 
-fn collect_pattern_names(pat: &Pattern, module: &Module, out: &mut BTreeSet<String>) {
+fn collect_pattern_bindings(pat: &Pattern, module: &Module, out: &mut BTreeSet<String>) {
     match pat {
         Pattern::Wildcard(_) | Pattern::Literal(_) => {}
-        Pattern::Name(id) => collect_ident(id, module, out),
+        Pattern::Name(id) => collect_binding_ident(id, module, out),
         Pattern::Ctor { name, args, .. } => {
-            collect_ident(name, module, out);
+            collect_binding_ident(name, module, out);
             for arg in args {
-                collect_pattern_names(arg, module, out);
+                collect_pattern_bindings(arg, module, out);
             }
         }
         Pattern::Tuple { items, .. } => {
             for item in items {
-                collect_pattern_names(item, module, out);
+                collect_pattern_bindings(item, module, out);
             }
         }
-        Pattern::Paren { inner, .. } => collect_pattern_names(inner, module, out),
+        Pattern::Paren { inner, .. } => collect_pattern_bindings(inner, module, out),
     }
 }
 
-fn collect_ident(id: &Ident, module: &Module, out: &mut BTreeSet<String>) {
+fn collect_binding_ident(id: &Ident, module: &Module, out: &mut BTreeSet<String>) {
     if let Some(name) = resolve_ident(module, id) {
-        out.insert(name);
+        if !is_core_literal_name(&name) {
+            out.insert(name);
+        }
     }
+}
+
+fn count_decl_names(
+    decl: &Decl,
+    module: &Module,
+    eligible: &BTreeSet<String>,
+    out: &mut BTreeMap<String, usize>,
+) {
+    match decl {
+        Decl::Import(d) => {
+            count_ident(&d.alias, module, eligible, out);
+        }
+        Decl::Export(d) => {
+            for name in &d.names {
+                count_ident(name, module, eligible, out);
+            }
+        }
+        Decl::Type(d) => {
+            count_ident(&d.name, module, eligible, out);
+            for p in &d.params {
+                count_ident(p, module, eligible, out);
+            }
+            for ctor in &d.ctors {
+                count_ident(&ctor.name, module, eligible, out);
+                for field in &ctor.fields {
+                    count_type_names(field, module, eligible, out);
+                }
+            }
+        }
+        Decl::Value(d) => {
+            count_ident(&d.name, module, eligible, out);
+            count_type_names(&d.ty, module, eligible, out);
+            count_expr_names(&d.expr, module, eligible, out);
+        }
+        Decl::Function(d) => {
+            count_ident(&d.name, module, eligible, out);
+            for tp in &d.type_params {
+                count_ident(tp, module, eligible, out);
+            }
+            count_function_type_names(&d.sig, module, eligible, out);
+            count_expr_names(&d.expr, module, eligible, out);
+        }
+    }
+}
+
+fn count_function_type_names(
+    sig: &FunctionType,
+    module: &Module,
+    eligible: &BTreeSet<String>,
+    out: &mut BTreeMap<String, usize>,
+) {
+    for p in &sig.params {
+        count_type_names(p, module, eligible, out);
+    }
+    count_type_names(&sig.ret, module, eligible, out);
+}
+
+fn count_type_names(
+    ty: &TypeExpr,
+    module: &Module,
+    eligible: &BTreeSet<String>,
+    out: &mut BTreeMap<String, usize>,
+) {
+    match ty {
+        TypeExpr::Prim(_, _) => {}
+        TypeExpr::Named { name, args, .. } => {
+            count_ident(name, module, eligible, out);
+            for arg in args {
+                count_type_names(arg, module, eligible, out);
+            }
+        }
+        TypeExpr::Optional { inner, .. }
+        | TypeExpr::Array { inner, .. }
+        | TypeExpr::Group { inner, .. } => {
+            count_type_names(inner, module, eligible, out);
+        }
+        TypeExpr::Map { key, value, .. } => {
+            count_type_names(key, module, eligible, out);
+            count_type_names(value, module, eligible, out);
+        }
+        TypeExpr::Tuple { items, .. } => {
+            for item in items {
+                count_type_names(item, module, eligible, out);
+            }
+        }
+        TypeExpr::Function { sig, .. } => count_function_type_names(sig, module, eligible, out),
+        TypeExpr::ResultSugar { ok, err, .. } => {
+            count_type_names(ok, module, eligible, out);
+            count_type_names(err, module, eligible, out);
+        }
+    }
+}
+
+fn count_expr_names(
+    expr: &Expr,
+    module: &Module,
+    eligible: &BTreeSet<String>,
+    out: &mut BTreeMap<String, usize>,
+) {
+    match expr {
+        Expr::Block { prefix, tail, .. } => {
+            for e in prefix {
+                count_expr_names(e, module, eligible, out);
+            }
+            count_expr_names(tail, module, eligible, out);
+        }
+        Expr::Unit(_) | Expr::Literal(_) => {}
+        Expr::Let {
+            name,
+            ty,
+            value,
+            body,
+            ..
+        } => {
+            count_ident(name, module, eligible, out);
+            if let Some(ty) = ty {
+                count_type_names(ty, module, eligible, out);
+            }
+            count_expr_names(value, module, eligible, out);
+            count_expr_names(body, module, eligible, out);
+        }
+        Expr::If {
+            cond,
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            count_expr_names(cond, module, eligible, out);
+            count_expr_names(then_branch, module, eligible, out);
+            count_expr_names(else_branch, module, eligible, out);
+        }
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
+            count_expr_names(scrutinee, module, eligible, out);
+            for arm in arms {
+                count_pattern_names(&arm.pattern, module, eligible, out);
+                count_expr_names(&arm.expr, module, eligible, out);
+            }
+        }
+        Expr::Call { callee, args, .. } => {
+            count_expr_names(callee, module, eligible, out);
+            for arg in args {
+                count_expr_names(arg, module, eligible, out);
+            }
+        }
+        Expr::Lambda {
+            params, ret, body, ..
+        } => {
+            for p in params {
+                count_ident(&p.name, module, eligible, out);
+                count_type_names(&p.ty, module, eligible, out);
+            }
+            count_type_names(ret, module, eligible, out);
+            count_expr_names(body, module, eligible, out);
+        }
+        Expr::Assert { cond, msg, .. } => {
+            count_expr_names(cond, module, eligible, out);
+            if let Some(msg) = msg {
+                count_expr_names(msg, module, eligible, out);
+            }
+        }
+        Expr::Require { expr, .. }
+        | Expr::Ensure { expr, .. }
+        | Expr::Paren { inner: expr, .. } => {
+            count_expr_names(expr, module, eligible, out);
+        }
+        Expr::Name(name) => count_ident(name, module, eligible, out),
+        Expr::NameApp { name, args, .. } => {
+            count_ident(name, module, eligible, out);
+            for arg in args {
+                count_expr_names(arg, module, eligible, out);
+            }
+        }
+    }
+}
+
+fn count_pattern_names(
+    pat: &Pattern,
+    module: &Module,
+    eligible: &BTreeSet<String>,
+    out: &mut BTreeMap<String, usize>,
+) {
+    match pat {
+        Pattern::Wildcard(_) | Pattern::Literal(_) => {}
+        Pattern::Name(id) => count_ident(id, module, eligible, out),
+        Pattern::Ctor { name, args, .. } => {
+            count_ident(name, module, eligible, out);
+            for arg in args {
+                count_pattern_names(arg, module, eligible, out);
+            }
+        }
+        Pattern::Tuple { items, .. } => {
+            for item in items {
+                count_pattern_names(item, module, eligible, out);
+            }
+        }
+        Pattern::Paren { inner, .. } => count_pattern_names(inner, module, eligible, out),
+    }
+}
+
+fn count_ident(
+    id: &Ident,
+    module: &Module,
+    eligible: &BTreeSet<String>,
+    out: &mut BTreeMap<String, usize>,
+) {
+    if let Some(name) = resolve_ident(module, id) {
+        if eligible.contains(&name) && !is_core_literal_name(&name) {
+            *out.entry(name).or_insert(0) += 1;
+        }
+    }
+}
+
+fn is_core_literal_name(name: &str) -> bool {
+    matches!(
+        name,
+        "E" | "T" | "V" | "F" | "v" | "i" | "m" | "l" | "c" | "a" | "t" | "f"
+    )
 }
 
 fn resolve_ident(module: &Module, id: &Ident) -> Option<String> {

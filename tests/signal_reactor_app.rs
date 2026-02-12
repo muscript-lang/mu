@@ -40,16 +40,16 @@ fn signal_reactor_integration_default_fixture_outputs_expected_lines() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     let lines = stdout.lines().collect::<Vec<_>>();
     let expected = vec![
-        "{\"a\":\"EL\"}",
-        "{\"a\":\"H\"}",
-        "{\"a\":\"XL\"}",
-        "{\"a\":\"ES\"}",
-        "{\"a\":\"XS\"}",
-        "{\"a\":\"H\"}",
-        "{\"a\":\"ERR\"}",
-        "{\"a\":\"ES\"}",
-        "{\"a\":\"H\"}",
-        "{\"a\":\"ERR\"}",
+        "EL",
+        "H",
+        "XL",
+        "ES",
+        "XS",
+        "H",
+        "ERR",
+        "ES",
+        "H",
+        "ERR",
     ];
 
     assert_eq!(

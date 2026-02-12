@@ -28,6 +28,12 @@ Practical impact:
 - Savings are strongest when identifiers repeat frequently across modules/functions.
 - The repo includes token-efficiency regression tests (`tests/token_efficiency.rs`).
 
+Recent app benchmark (`apps/signal_reactor`, measured by `tests/signal_reactor_token_economy.rs`):
+- readable bytes: `8266`
+- compressed bytes: `5838` (`70.62%`)
+- readable lexer-token count: `2753`
+- compressed lexer-token count: `2520` (`91.54%`)
+
 ## Quickstart
 
 1. Build:

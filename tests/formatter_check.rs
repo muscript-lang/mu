@@ -58,7 +58,7 @@ fn readable_compressed_roundtrip_stable() {
 }
 
 #[test]
-fn compressed_symtab_is_deterministic_lexicographic() {
+fn compressed_symtab_is_deterministic_frequency_ordered() {
     let src_a = "@m.a{F zed:()->i32=0;F alpha:()->i32=c(zed);F main:()->i32=c(alpha);}";
     let src_b = "@m.a{F main:()->i32=c(alpha);F alpha:()->i32=c(zed);F zed:()->i32=0;}";
 
@@ -79,5 +79,22 @@ fn compressed_symtab_is_deterministic_lexicographic() {
         .expect("symtab b");
 
     assert_eq!(symtab_a, symtab_b, "symtab must be deterministic");
-    assert_eq!(symtab_a, "alpha,main,zed");
+    assert_eq!(symtab_a, "alpha");
+}
+
+#[test]
+fn compressed_symtab_excludes_core_forms() {
+    let src = "@m.core{F main:()->i32={v(x=1,i(c(==,x,1),x,0))};}";
+    let out = parse_and_format_mode(src, FmtMode::Compressed).expect("source should parse");
+    let symtab = out
+        .split("$[")
+        .nth(1)
+        .and_then(|s| s.split("];").next())
+        .expect("symtab");
+    for core in ["v", "i", "m", "l", "c", "a", "F", "T", "V", "E", "t", "f"] {
+        assert!(
+            !symtab.split(',').any(|entry| entry == core),
+            "core form `{core}` should not be symtab-indexed: {symtab}"
+        );
+    }
 }

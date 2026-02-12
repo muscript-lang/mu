@@ -5,16 +5,33 @@ use muc::fmt::{FmtMode, format_program_mode};
 use muc::lexer::{TokenKind, tokenize};
 use muc::parser::parse_str;
 
+fn lexer_token_economy_count(src: &str) -> usize {
+    tokenize(src)
+        .expect("source should lex")
+        .iter()
+        .map(|token| match token.kind {
+            TokenKind::SymRef(_)
+            | TokenKind::Ident(_)
+            | TokenKind::Int(_)
+            | TokenKind::String(_) => 1,
+            TokenKind::Arrow
+            | TokenKind::FatArrow
+            | TokenKind::EqEq
+            | TokenKind::NotEq
+            | TokenKind::Le
+            | TokenKind::Ge => 2,
+            TokenKind::Eof => 0,
+            _ => 1,
+        })
+        .sum()
+}
+
 #[test]
 fn token_efficiency_benchmark_bytecode_bytes_per_token() {
     let mut measured = Vec::new();
     for example in ["examples/hello.mu", "examples/json.mu", "examples/http.mu"] {
         let src = fs::read_to_string(example).expect("example source should exist");
-        let tokens = tokenize(&src).expect("example should lex");
-        let token_count = tokens
-            .iter()
-            .filter(|t| !matches!(t.kind, TokenKind::Eof))
-            .count();
+        let token_count = lexer_token_economy_count(&src);
         let program = parse_str(&src).expect("example should parse");
         let bc = compile(&program).expect("example should compile");
         let ratio = bc.len() as f64 / token_count as f64;
@@ -39,16 +56,8 @@ fn compressed_mode_reduces_token_count_for_repeated_names() {
     let readable = format_program_mode(&program, FmtMode::Readable);
     let compressed = format_program_mode(&program, FmtMode::Compressed);
 
-    let readable_tokens = tokenize(&readable)
-        .expect("readable should lex")
-        .iter()
-        .filter(|t| !matches!(t.kind, TokenKind::Eof))
-        .count();
-    let compressed_tokens = tokenize(&compressed)
-        .expect("compressed should lex")
-        .iter()
-        .filter(|t| !matches!(t.kind, TokenKind::Eof))
-        .count();
+    let readable_tokens = lexer_token_economy_count(&readable);
+    let compressed_tokens = lexer_token_economy_count(&compressed);
 
     assert!(
         compressed_tokens < readable_tokens,
