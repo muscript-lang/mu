@@ -3,10 +3,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::ast::Span;
+use crate::ast::{Decl, Program};
 use crate::bytecode;
 use crate::fmt::{collect_mu_files, parse_and_format};
 use crate::parser::{ParseError, parse_str};
-use crate::typecheck::{TypeError, check_program, validate_modules};
+use crate::typecheck::{TypeError, check_program_with_modules, validate_modules};
 use crate::vm::run_bytecode;
 
 const HELP: &str = "muc - muScript compiler toolchain (v0.1)\n\nUSAGE:\n  muc fmt <file|dir> [--check]\n  muc check <file|dir>\n  muc run <file.mu|file.mub> [-- args...]\n  muc build <file.mu> -o <out.mub>\n";
@@ -123,20 +124,8 @@ fn cmd_check(path: &Path) -> Result<(), String> {
         return Err(format!("no .mu files found under {}", path.display()));
     }
 
-    let mut sources = Vec::new();
-    let mut programs = Vec::new();
-    for file in files {
-        let src = fs::read_to_string(&file)
-            .map_err(|e| format!("failed reading {}: {e}", file.display()))?;
-        let program = parse_str(&src).map_err(|e| format_parse_error(&file, &src, &e))?;
-        sources.push((file, src));
-        programs.push(program);
-    }
-
-    validate_modules(&programs).map_err(|e| format!("check failed: {e}"))?;
-    for ((file, src), program) in sources.iter().zip(programs.iter()) {
-        check_program(program).map_err(|e| format_type_error(file, src, &e))?;
-    }
+    let loaded = load_programs(files)?;
+    check_loaded_modules(&loaded)?;
 
     println!("check ok");
     Ok(())
@@ -150,23 +139,166 @@ fn cmd_run(file: &PathBuf, args: &[String]) -> Result<(), String> {
         return run_bytecode(&bytes, args).map_err(|e| e.to_string());
     }
 
-    let src =
-        fs::read_to_string(file).map_err(|e| format!("failed reading {}: {e}", file.display()))?;
-    let program = parse_str(&src).map_err(|e| format_parse_error(file, &src, &e))?;
-    check_program(&program).map_err(|e| format_type_error(file, &src, &e))?;
+    let loaded = load_entry_workspace(file)?;
+    check_loaded_modules(&loaded)?;
+    let program = entry_program(&loaded, file)?;
     let bytecode = bytecode::compile(&program).map_err(|e| format!("{}: {}", file.display(), e))?;
     run_bytecode(&bytecode, args).map_err(|e| e.to_string())
 }
 
-fn cmd_build(file: &PathBuf, output: &PathBuf) -> Result<(), String> {
-    let src =
-        fs::read_to_string(file).map_err(|e| format!("failed reading {}: {e}", file.display()))?;
-    let program = parse_str(&src).map_err(|e| format_parse_error(file, &src, &e))?;
-    check_program(&program).map_err(|e| format_type_error(file, &src, &e))?;
+fn cmd_build(file: &Path, output: &Path) -> Result<(), String> {
+    let loaded = load_entry_workspace(file)?;
+    check_loaded_modules(&loaded)?;
+    let program = entry_program(&loaded, file)?;
     let bytecode = bytecode::compile(&program).map_err(|e| format!("{}: {}", file.display(), e))?;
     fs::write(output, bytecode).map_err(|e| format!("failed writing {}: {e}", output.display()))?;
     println!("built {}", output.display());
     Ok(())
+}
+
+fn load_entry_workspace(entry_file: &Path) -> Result<Vec<(PathBuf, String, Program)>, String> {
+    let entry_src = fs::read_to_string(entry_file)
+        .map_err(|e| format!("failed reading {}: {e}", entry_file.display()))?;
+    let entry_program =
+        parse_str(&entry_src).map_err(|e| format_parse_error(entry_file, &entry_src, &e))?;
+    let mut loaded = vec![(entry_file.to_path_buf(), entry_src, entry_program)];
+
+    let root = entry_file.parent().unwrap_or_else(|| Path::new("."));
+    let candidate_files = collect_sibling_mu_files(root)?
+        .filter(|path| !same_path(path, entry_file))
+        .collect::<Vec<_>>();
+    let mut candidates = Vec::new();
+    for file in candidate_files {
+        let Ok(src) = fs::read_to_string(&file) else {
+            continue;
+        };
+        let Ok(program) = parse_str(&src) else {
+            continue;
+        };
+        let module_name = module_name_of(&program);
+        candidates.push((module_name, file, src, program));
+    }
+
+    loop {
+        let needed = unresolved_imports(&loaded);
+        if needed.is_empty() {
+            break;
+        }
+        let mut progress = false;
+        let mut i = 0;
+        while i < candidates.len() {
+            if needed.contains(&candidates[i].0) {
+                let (_, path, src, program) = candidates.swap_remove(i);
+                loaded.push((path, src, program));
+                progress = true;
+            } else {
+                i += 1;
+            }
+        }
+        if !progress {
+            break;
+        }
+    }
+
+    Ok(loaded)
+}
+
+fn load_programs(files: Vec<PathBuf>) -> Result<Vec<(PathBuf, String, Program)>, String> {
+    let mut loaded = Vec::new();
+    for file in files {
+        let src = fs::read_to_string(&file)
+            .map_err(|e| format!("failed reading {}: {e}", file.display()))?;
+        let program = parse_str(&src).map_err(|e| format_parse_error(&file, &src, &e))?;
+        loaded.push((file, src, program));
+    }
+    Ok(loaded)
+}
+
+fn collect_sibling_mu_files(root: &Path) -> Result<impl Iterator<Item = PathBuf>, String> {
+    let mut files = Vec::new();
+    let entries = fs::read_dir(root).map_err(|e| format!("walk error: {e}"))?;
+    for entry in entries {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let path = entry.path();
+        if path.is_file() && path.extension().and_then(|ext| ext.to_str()) == Some("mu") {
+            files.push(path);
+        }
+    }
+    files.sort();
+    Ok(files.into_iter())
+}
+
+fn check_loaded_modules(loaded: &[(PathBuf, String, Program)]) -> Result<(), String> {
+    let programs = loaded
+        .iter()
+        .map(|(_, _, program)| program.clone())
+        .collect::<Vec<_>>();
+    validate_modules(&programs).map_err(|e| format!("check failed: {e}"))?;
+    for (file, src, program) in loaded {
+        check_program_with_modules(program, &programs).map_err(|e| format_type_error(file, src, &e))?;
+    }
+    Ok(())
+}
+
+fn entry_program(
+    loaded: &[(PathBuf, String, Program)],
+    entry_file: &Path,
+) -> Result<Program, String> {
+    loaded
+        .iter()
+        .find(|(path, _, _)| same_path(path, entry_file))
+        .map(|(_, _, program)| program.clone())
+        .ok_or_else(|| format!("entry module {} was not loaded", entry_file.display()))
+}
+
+fn same_path(a: &Path, b: &Path) -> bool {
+    if a == b {
+        return true;
+    }
+    match (fs::canonicalize(a), fs::canonicalize(b)) {
+        (Ok(ac), Ok(bc)) => ac == bc,
+        _ => false,
+    }
+}
+
+fn unresolved_imports(loaded: &[(PathBuf, String, Program)]) -> std::collections::BTreeSet<String> {
+    let mut known = std::collections::BTreeSet::new();
+    for (_, _, program) in loaded {
+        known.insert(module_name_of(program));
+    }
+    for module in builtin_module_names() {
+        known.insert(module.to_string());
+    }
+
+    let mut unresolved = std::collections::BTreeSet::new();
+    for (_, _, program) in loaded {
+        for decl in &program.module.decls {
+            if let Decl::Import(import_decl) = decl {
+                let mod_name = import_decl.module.parts.join(".");
+                if !known.contains(&mod_name) {
+                    unresolved.insert(mod_name);
+                }
+            }
+        }
+    }
+    unresolved
+}
+
+fn module_name_of(program: &Program) -> String {
+    program.module.mod_id.parts.join(".")
+}
+
+fn builtin_module_names() -> [&'static str; 6] {
+    [
+        "core.prelude",
+        "core.io",
+        "core.fs",
+        "core.json",
+        "core.proc",
+        "core.http",
+    ]
 }
 
 fn format_parse_error(path: &Path, src: &str, err: &ParseError) -> String {

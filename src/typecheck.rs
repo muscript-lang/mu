@@ -126,6 +126,15 @@ pub fn check_program(program: &Program) -> Result<(), TypeError> {
     check_programs(std::slice::from_ref(program))
 }
 
+pub fn check_program_with_modules(
+    program: &Program,
+    programs: &[Program],
+) -> Result<(), TypeError> {
+    let modules = build_module_sigs(programs)?;
+    let module_name = modid_to_string(&program.module.mod_id.parts);
+    check_one_module(program, &module_name, &modules)
+}
+
 pub fn validate_modules(programs: &[Program]) -> Result<(), TypeError> {
     let _ = build_module_sigs(programs)?;
     Ok(())

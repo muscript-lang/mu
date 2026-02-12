@@ -18,6 +18,14 @@ fn unique_temp_mub_file(name: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("muc_{name}_{nanos}.mub"))
 }
 
+fn unique_temp_dir(name: &str) -> std::path::PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be after unix epoch")
+        .as_nanos();
+    std::env::temp_dir().join(format!("muc_dir_{name}_{nanos}"))
+}
+
 #[test]
 fn fmt_check_examples_succeeds() {
     let exe = env!("CARGO_BIN_EXE_muc");
@@ -113,4 +121,63 @@ fn run_command_executes_built_mub() {
     assert!(run.status.success(), "run on .mub should succeed");
 
     let _ = fs::remove_file(out);
+}
+
+#[test]
+fn run_loads_local_modules_for_import_validation() {
+    let exe = env!("CARGO_BIN_EXE_muc");
+    let dir = unique_temp_dir("run_imports");
+    fs::create_dir_all(&dir).expect("temp dir should be created");
+    let dep = dir.join("dep.mu");
+    let main = dir.join("main.mu");
+    fs::write(&dep, "@dep.mod{E[v];V v:i32=1;}").expect("dep source should be written");
+    fs::write(&main, "@main.app{:d=dep.mod;F main:()->i32=0;}").expect("main source should be written");
+
+    let output = Command::new(exe)
+        .args(["run", main.to_str().expect("temp path should be valid utf8")])
+        .output()
+        .expect("binary should run");
+
+    assert!(
+        output.status.success(),
+        "run should load sibling modules for import validation: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let _ = fs::remove_file(dep);
+    let _ = fs::remove_file(main);
+    let _ = fs::remove_dir(dir);
+}
+
+#[test]
+fn build_loads_local_modules_for_import_validation() {
+    let exe = env!("CARGO_BIN_EXE_muc");
+    let dir = unique_temp_dir("build_imports");
+    fs::create_dir_all(&dir).expect("temp dir should be created");
+    let dep = dir.join("dep.mu");
+    let main = dir.join("main.mu");
+    let out = dir.join("main.mub");
+    fs::write(&dep, "@dep.mod{E[v];V v:i32=1;}").expect("dep source should be written");
+    fs::write(&main, "@main.app{:d=dep.mod;F main:()->i32=0;}").expect("main source should be written");
+
+    let output = Command::new(exe)
+        .args([
+            "build",
+            main.to_str().expect("temp path should be valid utf8"),
+            "-o",
+            out.to_str().expect("temp path should be valid utf8"),
+        ])
+        .output()
+        .expect("binary should run");
+
+    assert!(
+        output.status.success(),
+        "build should load sibling modules for import validation: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let _ = fs::remove_file(dep);
+    let _ = fs::remove_file(main);
+    let _ = fs::remove_file(out);
+    let _ = fs::remove_dir(dir);
 }
