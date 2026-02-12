@@ -10,6 +10,14 @@ fn unique_temp_file(name: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("muc_{name}_{nanos}"))
 }
 
+fn unique_temp_mub_file(name: &str) -> std::path::PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be after unix epoch")
+        .as_nanos();
+    std::env::temp_dir().join(format!("muc_{name}_{nanos}.mub"))
+}
+
 #[test]
 fn fmt_check_examples_succeeds() {
     let exe = env!("CARGO_BIN_EXE_muc");
@@ -80,4 +88,29 @@ fn run_command_executes_program() {
         stderr.is_empty(),
         "run should not emit errors, got: {stderr}"
     );
+}
+
+#[test]
+fn run_command_executes_built_mub() {
+    let exe = env!("CARGO_BIN_EXE_muc");
+    let out = unique_temp_mub_file("hello_run");
+
+    let build = Command::new(exe)
+        .args([
+            "build",
+            "examples/hello.mu",
+            "-o",
+            out.to_str().expect("temp path should be valid utf8"),
+        ])
+        .output()
+        .expect("binary should run");
+    assert!(build.status.success(), "build should succeed");
+
+    let run = Command::new(exe)
+        .args(["run", out.to_str().expect("temp path should be valid utf8")])
+        .output()
+        .expect("binary should run");
+    assert!(run.status.success(), "run on .mub should succeed");
+
+    let _ = fs::remove_file(out);
 }

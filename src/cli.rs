@@ -9,7 +9,7 @@ use crate::parser::{ParseError, parse_str};
 use crate::typecheck::{TypeError, check_program, validate_modules};
 use crate::vm::run_bytecode;
 
-const HELP: &str = "muc - muScript compiler toolchain (v0.1)\n\nUSAGE:\n  muc fmt <file|dir> [--check]\n  muc check <file|dir>\n  muc run <file.mu> [-- args...]\n  muc build <file.mu> -o <out.mub>\n";
+const HELP: &str = "muc - muScript compiler toolchain (v0.1)\n\nUSAGE:\n  muc fmt <file|dir> [--check]\n  muc check <file|dir>\n  muc run <file.mu|file.mub> [-- args...]\n  muc build <file.mu> -o <out.mub>\n";
 
 pub fn run() -> Result<(), String> {
     let mut args: Vec<String> = env::args().collect();
@@ -63,7 +63,7 @@ fn parse_check(args: &[String]) -> Result<PathBuf, String> {
 
 fn parse_run(args: &[String]) -> Result<(PathBuf, Vec<String>), String> {
     if args.is_empty() || args[0] == "--help" || args[0] == "-h" {
-        return Err("usage: muc run <file.mu> [-- args...]".to_string());
+        return Err("usage: muc run <file.mu|file.mub> [-- args...]".to_string());
     }
     let file = PathBuf::from(&args[0]);
     if let Some((idx, _)) = args.iter().enumerate().find(|(_, a)| *a == "--") {
@@ -143,6 +143,13 @@ fn cmd_check(path: &Path) -> Result<(), String> {
 }
 
 fn cmd_run(file: &PathBuf, args: &[String]) -> Result<(), String> {
+    let is_mub = file.extension().and_then(|s| s.to_str()) == Some("mub");
+    if is_mub {
+        let bytes =
+            fs::read(file).map_err(|e| format!("failed reading {}: {e}", file.display()))?;
+        return run_bytecode(&bytes, args).map_err(|e| e.to_string());
+    }
+
     let src =
         fs::read_to_string(file).map_err(|e| format!("failed reading {}: {e}", file.display()))?;
     let program = parse_str(&src).map_err(|e| format_parse_error(file, &src, &e))?;
