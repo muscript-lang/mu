@@ -75,6 +75,17 @@ pub enum TokenKind {
     RBrace,
     Arrow,
     FatArrow,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Percent,
+    EqEq,
+    NotEq,
+    Lt,
+    Le,
+    Gt,
+    Ge,
     Underscore,
     Ident(String),
     Int(i64),
@@ -125,7 +136,16 @@ impl<'a> Lexer<'a> {
                 '.' => self.simple(idx, TokenKind::Dot),
                 '=' => {
                     self.bump();
-                    if self.peek_char() == Some('>') {
+                    if self.peek_char() == Some('=') {
+                        self.bump();
+                        Token {
+                            kind: TokenKind::EqEq,
+                            span: Span {
+                                start: idx,
+                                end: idx + 2,
+                            },
+                        }
+                    } else if self.peek_char() == Some('>') {
                         self.bump();
                         Token {
                             kind: TokenKind::FatArrow,
@@ -145,15 +165,80 @@ impl<'a> Lexer<'a> {
                     }
                 }
                 '|' => self.simple(idx, TokenKind::Pipe),
-                '!' => self.simple(idx, TokenKind::Bang),
+                '!' => {
+                    self.bump();
+                    if self.peek_char() == Some('=') {
+                        self.bump();
+                        Token {
+                            kind: TokenKind::NotEq,
+                            span: Span {
+                                start: idx,
+                                end: idx + 2,
+                            },
+                        }
+                    } else {
+                        Token {
+                            kind: TokenKind::Bang,
+                            span: Span {
+                                start: idx,
+                                end: idx + 1,
+                            },
+                        }
+                    }
+                }
                 '?' => self.simple(idx, TokenKind::Question),
                 '^' => self.simple(idx, TokenKind::Caret),
+                '+' => self.simple(idx, TokenKind::Plus),
+                '*' => self.simple(idx, TokenKind::Star),
+                '%' => self.simple(idx, TokenKind::Percent),
                 '(' => self.simple(idx, TokenKind::LParen),
                 ')' => self.simple(idx, TokenKind::RParen),
                 '[' => self.simple(idx, TokenKind::LBracket),
                 ']' => self.simple(idx, TokenKind::RBracket),
                 '{' => self.simple(idx, TokenKind::LBrace),
                 '}' => self.simple(idx, TokenKind::RBrace),
+                '<' => {
+                    self.bump();
+                    if self.peek_char() == Some('=') {
+                        self.bump();
+                        Token {
+                            kind: TokenKind::Le,
+                            span: Span {
+                                start: idx,
+                                end: idx + 2,
+                            },
+                        }
+                    } else {
+                        Token {
+                            kind: TokenKind::Lt,
+                            span: Span {
+                                start: idx,
+                                end: idx + 1,
+                            },
+                        }
+                    }
+                }
+                '>' => {
+                    self.bump();
+                    if self.peek_char() == Some('=') {
+                        self.bump();
+                        Token {
+                            kind: TokenKind::Ge,
+                            span: Span {
+                                start: idx,
+                                end: idx + 2,
+                            },
+                        }
+                    } else {
+                        Token {
+                            kind: TokenKind::Gt,
+                            span: Span {
+                                start: idx,
+                                end: idx + 1,
+                            },
+                        }
+                    }
+                }
                 '-' => {
                     self.bump();
                     if self.peek_char() == Some('>') {
@@ -166,14 +251,13 @@ impl<'a> Lexer<'a> {
                             },
                         }
                     } else {
-                        return Err(LexError {
-                            code: LexErrorCode::UnexpectedChar,
+                        Token {
+                            kind: TokenKind::Minus,
                             span: Span {
                                 start: idx,
                                 end: idx + 1,
                             },
-                            message: "unexpected `-`; expected `->`".to_string(),
-                        });
+                        }
                     }
                 }
                 '_' => {
@@ -206,16 +290,7 @@ impl<'a> Lexer<'a> {
                     self.lex_ident(idx, c)
                 }
                 c if c.is_ascii_digit() => self.lex_int()?,
-                '/' => {
-                    return Err(LexError {
-                        code: LexErrorCode::UnexpectedChar,
-                        span: Span {
-                            start: idx,
-                            end: idx + 1,
-                        },
-                        message: "unexpected `/`".to_string(),
-                    });
-                }
+                '/' => self.simple(idx, TokenKind::Slash),
                 _ => {
                     return Err(LexError {
                         code: LexErrorCode::UnexpectedChar,

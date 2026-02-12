@@ -146,3 +146,19 @@ fn bytecode_runs_top_level_value_reference() {
     let bc = compile(&program).expect("program should lower to bytecode");
     run_bytecode(&bc, &[]).expect("top-level V should be loadable");
 }
+
+#[test]
+fn bytecode_runs_numeric_operator_calls() {
+    let src = "@x.op1{F main:()->i32=c(-,c(+,1,2),3);}";
+    let program = parse_str(src).expect("program should parse");
+    let bc = compile(&program).expect("program should lower to bytecode");
+    run_bytecode(&bc, &[]).expect("numeric operators should run");
+}
+
+#[test]
+fn bytecode_runs_boolean_operator_calls() {
+    let src = "@x.op2{F main:()->i32={a(c(and,t,c(not,f)),\"bool\");0};}";
+    let program = parse_str(src).expect("program should parse");
+    let bc = compile(&program).expect("program should lower to bytecode");
+    run_bytecode(&bc, &[]).expect("boolean operators should run");
+}

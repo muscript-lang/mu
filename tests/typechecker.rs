@@ -119,3 +119,18 @@ fn main_must_return_i32() {
     let err = check_program(&program).expect_err("invalid main return type should fail");
     assert_eq!(err.code.as_str(), "E3014");
 }
+
+#[test]
+fn numeric_operator_call_typechecks() {
+    let src = "@m.op1{F main:()->i32=c(+,1,2);}";
+    let program = parse_str(src).expect("program should parse");
+    check_program(&program).expect("numeric prelude operator should typecheck");
+}
+
+#[test]
+fn numeric_operator_rejects_wrong_arg_types() {
+    let src = "@m.op2{F main:()->i32=c(+,t,2);}";
+    let program = parse_str(src).expect("program should parse");
+    let err = check_program(&program).expect_err("wrong arg types should fail");
+    assert_eq!(err.code, TypeErrorCode::TypeMismatch);
+}

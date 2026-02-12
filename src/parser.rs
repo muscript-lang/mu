@@ -564,6 +564,20 @@ impl Parser {
         {
             return Ok(Expr::Literal(self.parse_literal()?));
         }
+        if self.at_simple(TokenKind::Plus)
+            || self.at_simple(TokenKind::Minus)
+            || self.at_simple(TokenKind::Star)
+            || self.at_simple(TokenKind::Slash)
+            || self.at_simple(TokenKind::Percent)
+            || self.at_simple(TokenKind::EqEq)
+            || self.at_simple(TokenKind::NotEq)
+            || self.at_simple(TokenKind::Lt)
+            || self.at_simple(TokenKind::Le)
+            || self.at_simple(TokenKind::Gt)
+            || self.at_simple(TokenKind::Ge)
+        {
+            return self.parse_symbol_name_expr();
+        }
         if matches!(self.peek().kind, TokenKind::Ident(_)) {
             return self.parse_name_or_name_app();
         }
@@ -591,6 +605,34 @@ impl Parser {
             name,
             args,
         })
+    }
+
+    fn parse_symbol_name_expr(&mut self) -> Result<Expr, ParseError> {
+        let token = self.bump();
+        let name = match token.kind {
+            TokenKind::Plus => "+",
+            TokenKind::Minus => "-",
+            TokenKind::Star => "*",
+            TokenKind::Slash => "/",
+            TokenKind::Percent => "%",
+            TokenKind::EqEq => "==",
+            TokenKind::NotEq => "!=",
+            TokenKind::Lt => "<",
+            TokenKind::Le => "<=",
+            TokenKind::Gt => ">",
+            TokenKind::Ge => ">=",
+            _ => {
+                return Err(ParseError {
+                    code: ParseErrorCode::ExpectedExpr,
+                    span: token.span,
+                    message: "expected symbolic operator".to_string(),
+                });
+            }
+        };
+        Ok(Expr::Name(Ident {
+            name: name.to_string(),
+            span: token.span,
+        }))
     }
 
     fn parse_expr_list(&mut self) -> Result<Vec<Expr>, ParseError> {

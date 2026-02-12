@@ -595,10 +595,123 @@ fn call_builtin(id: u8, args: &[Value]) -> Result<Value, VmError> {
                 Err(e) => Ok(err_value(format!("get failed: {e}"))),
             }
         }
+        20 => {
+            let (a, b) = int2(args, "+")?;
+            Ok(Value::Int(a + b))
+        }
+        21 => {
+            let (a, b) = int2(args, "-")?;
+            Ok(Value::Int(a - b))
+        }
+        22 => {
+            let (a, b) = int2(args, "*")?;
+            Ok(Value::Int(a * b))
+        }
+        23 => {
+            let (a, b) = int2(args, "/")?;
+            if b == 0 {
+                return Err(VmError {
+                    message: "division by zero".to_string(),
+                });
+            }
+            Ok(Value::Int(a / b))
+        }
+        24 => {
+            let (a, b) = int2(args, "%")?;
+            if b == 0 {
+                return Err(VmError {
+                    message: "division by zero".to_string(),
+                });
+            }
+            Ok(Value::Int(a % b))
+        }
+        25 => {
+            let (a, b) = int2(args, "==")?;
+            Ok(Value::Bool(a == b))
+        }
+        26 => {
+            let (a, b) = int2(args, "!=")?;
+            Ok(Value::Bool(a != b))
+        }
+        27 => {
+            let (a, b) = int2(args, "<")?;
+            Ok(Value::Bool(a < b))
+        }
+        28 => {
+            let (a, b) = int2(args, "<=")?;
+            Ok(Value::Bool(a <= b))
+        }
+        29 => {
+            let (a, b) = int2(args, ">")?;
+            Ok(Value::Bool(a > b))
+        }
+        30 => {
+            let (a, b) = int2(args, ">=")?;
+            Ok(Value::Bool(a >= b))
+        }
+        31 => {
+            let (a, b) = bool2(args, "and")?;
+            Ok(Value::Bool(a && b))
+        }
+        32 => {
+            let (a, b) = bool2(args, "or")?;
+            Ok(Value::Bool(a || b))
+        }
+        33 => {
+            if args.len() != 1 {
+                return Err(VmError {
+                    message: "not expects one argument".to_string(),
+                });
+            }
+            let Value::Bool(v) = args[0] else {
+                return Err(VmError {
+                    message: "not expects bool arguments".to_string(),
+                });
+            };
+            Ok(Value::Bool(!v))
+        }
         _ => Err(VmError {
             message: format!("unknown builtin id {id}"),
         }),
     }
+}
+
+fn int2(args: &[Value], op: &str) -> Result<(i64, i64), VmError> {
+    if args.len() != 2 {
+        return Err(VmError {
+            message: format!("{op} expects two arguments"),
+        });
+    }
+    let Value::Int(a) = args[0] else {
+        return Err(VmError {
+            message: format!("{op} expects integer arguments"),
+        });
+    };
+    let Value::Int(b) = args[1] else {
+        return Err(VmError {
+            message: format!("{op} expects integer arguments"),
+        });
+    };
+    Ok((a, b))
+}
+
+fn bool2(args: &[Value], op: &str) -> Result<(bool, bool), VmError> {
+    if args.len() != 2 {
+        return Err(VmError {
+            message: format!("{op} expects two arguments"),
+        });
+    }
+    let Value::Bool(a) = args[0] else {
+        return Err(VmError {
+            message: format!("{op} expects bool arguments"),
+        });
+    };
+    let Value::Bool(b) = args[1] else {
+        return Err(VmError {
+            message: format!("{op} expects bool arguments"),
+        });
+    };
+    Ok((a, b))
 }
 
 fn ok_value(value: Value) -> Value {

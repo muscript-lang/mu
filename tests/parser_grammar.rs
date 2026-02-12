@@ -31,3 +31,11 @@ fn formatter_keeps_ensure_parseable() {
     assert!(formatted.contains("_ t"), "ensure should include separator");
     parse_str(formatted.trim_end()).expect("formatted ensure should reparse");
 }
+
+#[test]
+fn parses_symbolic_prelude_operator_names() {
+    let src = "@m.op{F main:()->i32=c(+,1,2);}";
+    let program = parse_str(src).expect("program should parse");
+    let formatted = format_program(&program);
+    assert!(formatted.contains("c(+,1,2)"));
+}

@@ -1088,6 +1088,44 @@ fn builtin_values() -> &'static BTreeMap<String, Type> {
                 },
             },
         );
+        for name in ["+", "-", "*", "/", "%"] {
+            map.insert(
+                name.to_string(),
+                Type::Function {
+                    params: vec![Type::I32, Type::I32],
+                    ret: Box::new(Type::I32),
+                    effects: EffectSet::default(),
+                },
+            );
+        }
+        for name in ["<", "<=", ">", ">=", "==", "!="] {
+            map.insert(
+                name.to_string(),
+                Type::Function {
+                    params: vec![Type::I32, Type::I32],
+                    ret: Box::new(Type::Bool),
+                    effects: EffectSet::default(),
+                },
+            );
+        }
+        for name in ["and", "or"] {
+            map.insert(
+                name.to_string(),
+                Type::Function {
+                    params: vec![Type::Bool, Type::Bool],
+                    ret: Box::new(Type::Bool),
+                    effects: EffectSet::default(),
+                },
+            );
+        }
+        map.insert(
+            "not".to_string(),
+            Type::Function {
+                params: vec![Type::Bool],
+                ret: Box::new(Type::Bool),
+                effects: EffectSet::default(),
+            },
+        );
         map
     })
 }
