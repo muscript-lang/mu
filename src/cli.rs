@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use crate::bytecode;
 use crate::fmt::{collect_mu_files, parse_and_format};
 use crate::parser::parse_str;
-use crate::typecheck::check_program;
+use crate::typecheck::{check_program, check_programs};
 use crate::vm::run_bytecode;
 
 const HELP: &str = "muc - muScript compiler toolchain (v0.1 scaffold)\n\nUSAGE:\n  muc fmt <file|dir> [--check]\n  muc check <file|dir>\n  muc run <file.mu> [-- args...]\n  muc build <file.mu> -o <out.mub>\n";
@@ -121,12 +121,14 @@ fn cmd_check(path: &PathBuf) -> Result<(), String> {
         return Err(format!("no .mu files found under {}", path.display()));
     }
 
+    let mut programs = Vec::new();
     for file in files {
         let src = fs::read_to_string(&file)
             .map_err(|e| format!("failed reading {}: {e}", file.display()))?;
         let program = parse_str(&src).map_err(|e| format!("{}: {}", file.display(), e))?;
-        check_program(&program).map_err(|e| format!("{}: {}", file.display(), e))?;
+        programs.push(program);
     }
+    check_programs(&programs).map_err(|e| e.to_string())?;
 
     println!("check ok");
     Ok(())
