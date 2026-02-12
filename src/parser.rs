@@ -510,22 +510,22 @@ impl Parser {
         if self.at_simple(TokenKind::LBrace) {
             return self.parse_block_expr();
         }
-        if self.at_ident_text("v") {
+        if self.at_ident_text("v") && self.lookahead_is_simple(1, TokenKind::LParen) {
             return self.parse_let_expr();
         }
-        if self.at_ident_text("i") {
+        if self.at_ident_text("i") && self.lookahead_is_simple(1, TokenKind::LParen) {
             return self.parse_if_expr();
         }
-        if self.at_ident_text("m") {
+        if self.at_ident_text("m") && self.lookahead_is_simple(1, TokenKind::LParen) {
             return self.parse_match_expr();
         }
-        if self.at_ident_text("c") {
+        if self.at_ident_text("c") && self.lookahead_is_simple(1, TokenKind::LParen) {
             return self.parse_call_expr();
         }
-        if self.at_ident_text("l") {
+        if self.at_ident_text("l") && self.lookahead_is_simple(1, TokenKind::LParen) {
             return self.parse_lambda_expr();
         }
-        if self.at_ident_text("a") {
+        if self.at_ident_text("a") && self.lookahead_is_simple(1, TokenKind::LParen) {
             return self.parse_assert_expr();
         }
         if self.at_simple(TokenKind::Underscore) {

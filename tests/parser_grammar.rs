@@ -58,3 +58,14 @@ fn preserves_array_suffix_in_type_arguments() {
         "array suffix should be preserved in canonical formatting: {formatted}"
     );
 }
+
+#[test]
+fn allows_identifiers_named_like_core_forms() {
+    let src = "@m.forms{F v:()->i32=0;F i:()->i32=0;F m:()->i32=0;F c:()->i32=0;F l:()->i32=0;F a:()->i32=0;F main:()->i32=c(v);}";
+    let program = parse_str(src).expect("program should parse");
+    let formatted = format_program(&program);
+    assert!(
+        formatted.contains("F main:()->i32=c(v);"),
+        "formatted output should preserve identifier call through explicit c(...): {formatted}"
+    );
+}
