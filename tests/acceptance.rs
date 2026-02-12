@@ -113,6 +113,22 @@ fn acceptance_examples_run_and_build_matrix() {
             "run should pass for {example}: {}",
             String::from_utf8_lossy(&run_src.stderr)
         );
+        let src_stdout = String::from_utf8_lossy(&run_src.stdout);
+        match example {
+            "examples/hello.mu" => assert!(
+                src_stdout.contains("hello"),
+                "hello source run should print hello, got: {src_stdout}"
+            ),
+            "examples/json.mu" => assert!(
+                src_stdout.contains("{\"mu\":1}") || src_stdout.contains("{\"mu\":1.0}"),
+                "json source run should print roundtrip output, got: {src_stdout}"
+            ),
+            "examples/http.mu" => assert!(
+                src_stdout.trim().is_empty(),
+                "http source run should be quiet by default, got: {src_stdout}"
+            ),
+            _ => unreachable!("unexpected example path"),
+        }
 
         let out = temp_mub("example_matrix");
         let build = Command::new(exe)
@@ -134,6 +150,22 @@ fn acceptance_examples_run_and_build_matrix() {
             "run .mub should pass for {example}: {}",
             String::from_utf8_lossy(&run_mub.stderr)
         );
+        let mub_stdout = String::from_utf8_lossy(&run_mub.stdout);
+        match example {
+            "examples/hello.mu" => assert!(
+                mub_stdout.contains("hello"),
+                "hello .mub run should print hello, got: {mub_stdout}"
+            ),
+            "examples/json.mu" => assert!(
+                mub_stdout.contains("{\"mu\":1}") || mub_stdout.contains("{\"mu\":1.0}"),
+                "json .mub run should print roundtrip output, got: {mub_stdout}"
+            ),
+            "examples/http.mu" => assert!(
+                mub_stdout.trim().is_empty(),
+                "http .mub run should be quiet by default, got: {mub_stdout}"
+            ),
+            _ => unreachable!("unexpected example path"),
+        }
 
         let _ = fs::remove_file(out);
     }
