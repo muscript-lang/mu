@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use crate::ast::{Decl, Expr, FunctionDecl, Literal, Pattern, Program};
@@ -32,6 +32,8 @@ pub enum OpCode {
     JumpIfFalse = 9,
     CallBuiltin = 10,
     Return = 11,
+    MkAdt = 12,
+    JumpIfTag = 13,
 }
 
 #[derive(Default)]
@@ -41,11 +43,15 @@ struct Lowerer {
     code: Vec<u8>,
     locals: HashMap<String, u32>,
     next_local: u32,
+    ctor_names: HashSet<String>,
 }
 
 pub fn compile(program: &Program) -> Result<Vec<u8>, BytecodeError> {
     let main = find_main(program)?;
-    let mut lowerer = Lowerer::default();
+    let mut lowerer = Lowerer {
+        ctor_names: collect_ctors(program),
+        ..Lowerer::default()
+    };
     lowerer.lower_expr(&main.expr)?;
     lowerer.code.push(OpCode::Return as u8);
     Ok(encode(&lowerer))
@@ -183,6 +189,25 @@ impl Lowerer {
                                 self.patch_jump_to_current(next_patch);
                             }
                         }
+                        Pattern::Ctor { name, args, .. } => {
+                            if !args.is_empty() {
+                                return Err(BytecodeError {
+                                    message:
+                                        "only nullary constructor patterns are supported in bytecode lowering"
+                                            .to_string(),
+                                });
+                            }
+                            let tag_id = self.intern_string(&name.name);
+                            self.code.push(OpCode::LoadLocal as u8);
+                            self.code.extend_from_slice(&scrut_slot.to_le_bytes());
+                            let arm_patch = self.emit_jump_if_tag_placeholder(tag_id);
+                            let next_patch = self.emit_jump_placeholder(OpCode::Jump);
+                            self.patch_jump_to_current(arm_patch);
+                            self.lower_expr(&arm.expr)?;
+                            let end_patch = self.emit_jump_placeholder(OpCode::Jump);
+                            end_jumps.push(end_patch);
+                            self.patch_jump_to_current(next_patch);
+                        }
                         _ => {
                             return Err(BytecodeError {
                                 message:
@@ -197,10 +222,26 @@ impl Lowerer {
                 }
             }
             Expr::Paren { inner, .. } => self.lower_expr(inner)?,
+            Expr::NameApp { name, args, .. } => {
+                if !self.ctor_names.contains(&name.name) {
+                    return Err(BytecodeError {
+                        message: format!(
+                            "name application `{}` is not a known constructor in this module",
+                            name.name
+                        ),
+                    });
+                }
+                for arg in args {
+                    self.lower_expr(arg)?;
+                }
+                let tag_id = self.intern_string(&name.name);
+                self.code.push(OpCode::MkAdt as u8);
+                self.code.extend_from_slice(&tag_id.to_le_bytes());
+                self.code.push(args.len() as u8);
+            }
             Expr::Assert { .. }
             | Expr::Require { .. }
             | Expr::Ensure { .. }
-            | Expr::NameApp { .. }
             | Expr::Lambda { .. }
              => {
                 return Err(BytecodeError {
@@ -234,10 +275,30 @@ impl Lowerer {
         patch
     }
 
+    fn emit_jump_if_tag_placeholder(&mut self, tag_id: u32) -> usize {
+        self.code.push(OpCode::JumpIfTag as u8);
+        self.code.extend_from_slice(&tag_id.to_le_bytes());
+        let patch = self.code.len();
+        self.code.extend_from_slice(&0u32.to_le_bytes());
+        patch
+    }
+
     fn patch_jump_to_current(&mut self, patch_pos: usize) {
         let target = self.code.len() as u32;
         self.code[patch_pos..patch_pos + 4].copy_from_slice(&target.to_le_bytes());
     }
+}
+
+fn collect_ctors(program: &Program) -> HashSet<String> {
+    let mut set = HashSet::new();
+    for decl in &program.module.decls {
+        if let Decl::Type(td) = decl {
+            for ctor in &td.ctors {
+                set.insert(ctor.name.name.clone());
+            }
+        }
+    }
+    set
 }
 
 fn builtin_id(name: &str) -> Option<u8> {

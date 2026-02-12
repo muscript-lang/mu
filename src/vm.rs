@@ -7,6 +7,7 @@ enum Value {
     Int(i64),
     Bool(bool),
     String(String),
+    Adt { tag: String, fields: Vec<Value> },
     Unit,
 }
 
@@ -142,6 +143,45 @@ pub fn run_bytecode(bytecode: &[u8], _args: &[String]) -> Result<(), VmError> {
                 let args = stack.split_off(stack.len() - argc);
                 let result = call_builtin(id, &args)?;
                 stack.push(result);
+            }
+            x if x == OpCode::MkAdt as u8 => {
+                let tag_idx = read_u32(code, &mut ip)? as usize;
+                let argc = read_u8(code, &mut ip)? as usize;
+                if stack.len() < argc {
+                    return Err(VmError {
+                        message: "stack underflow in MK_ADT".to_string(),
+                    });
+                }
+                let tag = strings.get(tag_idx).ok_or_else(|| VmError {
+                    message: "adt tag index out of bounds".to_string(),
+                })?;
+                let fields = stack.split_off(stack.len() - argc);
+                stack.push(Value::Adt {
+                    tag: tag.clone(),
+                    fields,
+                });
+            }
+            x if x == OpCode::JumpIfTag as u8 => {
+                let tag_idx = read_u32(code, &mut ip)? as usize;
+                let target = read_u32(code, &mut ip)? as usize;
+                let tag = strings.get(tag_idx).ok_or_else(|| VmError {
+                    message: "adt tag index out of bounds".to_string(),
+                })?;
+                let value = stack.pop().ok_or_else(|| VmError {
+                    message: "stack underflow in JMP_IF_TAG".to_string(),
+                })?;
+                let matches = match value {
+                    Value::Adt { tag: value_tag, .. } => value_tag == *tag,
+                    _ => false,
+                };
+                if matches {
+                    if target > code.len() {
+                        return Err(VmError {
+                            message: "jump target out of bounds".to_string(),
+                        });
+                    }
+                    ip = target;
+                }
             }
             x if x == OpCode::Return as u8 => {
                 let ret = stack.pop().ok_or_else(|| VmError {

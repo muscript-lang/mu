@@ -33,3 +33,11 @@ fn bytecode_runs_bool_match_with_wildcard() {
     let bc = compile(&program).expect("program should lower to bytecode");
     run_bytecode(&bc, &[]).expect("bytecode should run");
 }
+
+#[test]
+fn bytecode_runs_nullary_ctor_match() {
+    let src = "@x.adt{T Opt[A]=None|Some(A);F main:()->i32=m(None()){None()=>0;_=>1;};}";
+    let program = parse_str(src).expect("program should parse");
+    let bc = compile(&program).expect("program should lower to bytecode");
+    run_bytecode(&bc, &[]).expect("bytecode should run");
+}
