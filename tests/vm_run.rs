@@ -106,3 +106,19 @@ fn bytecode_runs_user_defined_function_call() {
     let bc = compile(&program).expect("program should lower to bytecode");
     run_bytecode(&bc, &[]).expect("user function call should run");
 }
+
+#[test]
+fn bytecode_runs_non_capturing_lambda_call() {
+    let src = "@x.l1{F main:()->i32=v(fn1=l(x:i32):i32=x,c(fn1,0));}";
+    let program = parse_str(src).expect("program should parse");
+    let bc = compile(&program).expect("program should lower to bytecode");
+    run_bytecode(&bc, &[]).expect("lambda call should run");
+}
+
+#[test]
+fn bytecode_runs_capturing_lambda_call() {
+    let src = "@x.l2{F main:()->i32=v(y:i32=0,v(fn1=l(x:i32):i32=y,c(fn1,1)));}";
+    let program = parse_str(src).expect("program should parse");
+    let bc = compile(&program).expect("program should lower to bytecode");
+    run_bytecode(&bc, &[]).expect("capturing lambda call should run");
+}

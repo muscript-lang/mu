@@ -6,6 +6,7 @@ use crate::bytecode::{MAGIC, OpCode};
 #[derive(Debug, Clone)]
 struct FunctionBlob {
     arity: u8,
+    captures: u8,
     code: Vec<u8>,
 }
 
@@ -15,6 +16,7 @@ enum Value {
     Bool(bool),
     String(String),
     Adt { tag: String, fields: Vec<Value> },
+    Closure { fn_id: u32, captures: Vec<Value> },
     Unit,
 }
 
@@ -172,11 +174,67 @@ pub fn run_bytecode(bytecode: &[u8], _args: &[String]) -> Result<(), VmError> {
                         message: "stack underflow in CALL_FN".to_string(),
                     });
                 }
+                if target.captures != 0 {
+                    return Err(VmError {
+                        message: "CALL_FN cannot target closure-compiled function".to_string(),
+                    });
+                }
                 let args = stack.split_off(stack.len() - argc);
                 frames.push(Frame {
                     fn_id,
                     ip: 0,
                     locals: args,
+                });
+            }
+            x if x == OpCode::MkClosure as u8 => {
+                let fn_id = read_u32(code, &mut frame.ip)?;
+                let ncap = read_u8(code, &mut frame.ip)? as usize;
+                if stack.len() < ncap {
+                    return Err(VmError {
+                        message: "stack underflow in MK_CLOSURE".to_string(),
+                    });
+                }
+                let captures = stack.split_off(stack.len() - ncap);
+                stack.push(Value::Closure { fn_id, captures });
+            }
+            x if x == OpCode::CallClosure as u8 => {
+                let argc = read_u8(code, &mut frame.ip)? as usize;
+                if stack.len() < argc + 1 {
+                    return Err(VmError {
+                        message: "stack underflow in CALL_CLOSURE".to_string(),
+                    });
+                }
+                let args = stack.split_off(stack.len() - argc);
+                let closure = stack.pop().ok_or_else(|| VmError {
+                    message: "stack underflow in CALL_CLOSURE".to_string(),
+                })?;
+                let Value::Closure { fn_id, captures } = closure else {
+                    return Err(VmError {
+                        message: "CALL_CLOSURE expects a closure value".to_string(),
+                    });
+                };
+                let target = functions.get(fn_id as usize).ok_or_else(|| VmError {
+                    message: "closure function id out of bounds".to_string(),
+                })?;
+                if target.arity as usize != argc {
+                    return Err(VmError {
+                        message: format!(
+                            "closure arity mismatch: expected {}, got {}",
+                            target.arity, argc
+                        ),
+                    });
+                }
+                if target.captures as usize != captures.len() {
+                    return Err(VmError {
+                        message: "closure capture count mismatch".to_string(),
+                    });
+                }
+                let mut locals = captures;
+                locals.extend(args);
+                frames.push(Frame {
+                    fn_id: fn_id as usize,
+                    ip: 0,
+                    locals,
                 });
             }
             x if x == OpCode::MkAdt as u8 => {
@@ -333,6 +391,7 @@ fn decode(bytecode: &[u8]) -> Result<(Vec<String>, Vec<FunctionBlob>, u32), VmEr
     let mut functions = Vec::with_capacity(nfuncs);
     for _ in 0..nfuncs {
         let arity = read_u8(bytecode, &mut cursor)?;
+        let captures = read_u8(bytecode, &mut cursor)?;
         let code_len = read_u32(bytecode, &mut cursor)? as usize;
         if cursor + code_len > bytecode.len() {
             return Err(VmError {
@@ -341,7 +400,11 @@ fn decode(bytecode: &[u8]) -> Result<(Vec<String>, Vec<FunctionBlob>, u32), VmEr
         }
         let code = bytecode[cursor..cursor + code_len].to_vec();
         cursor += code_len;
-        functions.push(FunctionBlob { arity, code });
+        functions.push(FunctionBlob {
+            arity,
+            captures,
+            code,
+        });
     }
 
     let entry = read_u32(bytecode, &mut cursor)?;
@@ -475,6 +538,7 @@ fn call_builtin(id: u8, args: &[Value]) -> Result<Value, VmError> {
             match &args[0] {
                 Value::String(s) => Ok(Value::String(s.clone())),
                 Value::Adt { tag, fields } => Ok(Value::String(format!("{tag}({})", fields.len()))),
+                Value::Closure { .. } => Ok(Value::String("<closure>".to_string())),
                 Value::Int(v) => Ok(Value::String(v.to_string())),
                 Value::Bool(v) => Ok(Value::String(v.to_string())),
                 Value::Unit => Ok(Value::String("()".to_string())),

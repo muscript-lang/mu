@@ -1,7 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 
-use crate::ast::{Decl, Expr, Literal, Pattern, Program};
+use crate::ast::{Decl, Expr, FunctionDecl, Literal, Param, Pattern, Program};
 
 pub const MAGIC: &[u8; 4] = b"MUB1";
 
@@ -38,11 +38,14 @@ pub enum OpCode {
     AssertDyn = 15,
     GetAdtField = 16,
     CallFn = 17,
+    MkClosure = 18,
+    CallClosure = 19,
 }
 
 #[derive(Debug, Clone)]
 pub struct FunctionBytecode {
     pub arity: u8,
+    pub captures: u8,
     pub code: Vec<u8>,
 }
 
@@ -52,23 +55,24 @@ struct CompileCtx {
     string_ids: HashMap<String, u32>,
     ctor_names: HashSet<String>,
     fn_ids: HashMap<String, u32>,
+    functions: Vec<FunctionBytecode>,
 }
 
 struct Lowerer<'a> {
     ctx: &'a mut CompileCtx,
     code: Vec<u8>,
-    locals: HashMap<String, u32>,
+    locals: BTreeMap<String, u32>,
     next_local: u32,
 }
 
 pub fn compile(program: &Program) -> Result<Vec<u8>, BytecodeError> {
-    let mut functions = Vec::new();
+    let mut top_functions = Vec::new();
     for decl in &program.module.decls {
         if let Decl::Function(f) = decl {
-            functions.push(f);
+            top_functions.push(f);
         }
     }
-    if functions.is_empty() {
+    if top_functions.is_empty() {
         return Err(BytecodeError {
             message: "missing `main` function".to_string(),
         });
@@ -78,41 +82,53 @@ pub fn compile(program: &Program) -> Result<Vec<u8>, BytecodeError> {
         ctor_names: collect_ctors(program),
         ..CompileCtx::default()
     };
-    for (idx, f) in functions.iter().enumerate() {
+
+    for (idx, f) in top_functions.iter().enumerate() {
         ctx.fn_ids.insert(f.name.name.clone(), idx as u32);
     }
-    let main_id = *ctx.fn_ids.get("main").ok_or_else(|| BytecodeError {
+    let top_len = top_functions.len();
+    ctx.functions = vec![
+        FunctionBytecode {
+            arity: 0,
+            captures: 0,
+            code: Vec::new()
+        };
+        top_len
+    ];
+
+    for (idx, f) in top_functions.iter().enumerate() {
+        let func = lower_top_function(&mut ctx, f)?;
+        ctx.functions[idx] = func;
+    }
+
+    let entry_fn = *ctx.fn_ids.get("main").ok_or_else(|| BytecodeError {
         message: "missing `main` function".to_string(),
     })?;
 
-    let mut fn_bodies = Vec::new();
-    for f in functions {
-        let mut lowerer = Lowerer::new(&mut ctx, f.sig.params.len() as u32);
-        lowerer.lower_expr(&f.expr)?;
-        lowerer.code.push(OpCode::Return as u8);
-        fn_bodies.push(FunctionBytecode {
-            arity: f.sig.params.len() as u8,
-            code: lowerer.code,
-        });
-    }
+    Ok(encode(&ctx.strings, &ctx.functions, entry_fn))
+}
 
-    Ok(encode(&ctx.strings, &fn_bodies, main_id))
+fn lower_top_function(ctx: &mut CompileCtx, f: &FunctionDecl) -> Result<FunctionBytecode, BytecodeError> {
+    let mut locals = BTreeMap::new();
+    for i in 0..f.sig.params.len() {
+        locals.insert(format!("arg{i}"), i as u32);
+    }
+    let mut lowerer = Lowerer {
+        ctx,
+        code: Vec::new(),
+        next_local: f.sig.params.len() as u32,
+        locals,
+    };
+    lowerer.lower_expr(&f.expr)?;
+    lowerer.code.push(OpCode::Return as u8);
+    Ok(FunctionBytecode {
+        arity: f.sig.params.len() as u8,
+        captures: 0,
+        code: lowerer.code,
+    })
 }
 
 impl<'a> Lowerer<'a> {
-    fn new(ctx: &'a mut CompileCtx, arity: u32) -> Self {
-        let mut locals = HashMap::new();
-        for i in 0..arity {
-            locals.insert(format!("arg{i}"), i);
-        }
-        Lowerer {
-            ctx,
-            code: Vec::new(),
-            locals,
-            next_local: arity,
-        }
-    }
-
     fn lower_expr(&mut self, expr: &Expr) -> Result<(), BytecodeError> {
         match expr {
             Expr::Literal(Literal::Int(v, _)) => {
@@ -145,11 +161,7 @@ impl<'a> Lowerer<'a> {
                 self.code.extend_from_slice(&slot.to_le_bytes());
                 let prev = self.locals.insert(name.name.clone(), slot);
                 self.lower_expr(body)?;
-                if let Some(old) = prev {
-                    self.locals.insert(name.name.clone(), old);
-                } else {
-                    self.locals.remove(&name.name);
-                }
+                restore_local(&mut self.locals, &name.name, prev);
             }
             Expr::Block { prefix, tail, .. } => {
                 for e in prefix {
@@ -179,27 +191,57 @@ impl<'a> Lowerer<'a> {
                 self.code[patch_end..patch_end + 4].copy_from_slice(&end_ip.to_le_bytes());
             }
             Expr::Call { callee, args, .. } => {
-                let Expr::Name(name) = &**callee else {
-                    return Err(BytecodeError {
-                        message: "only direct named calls are supported in v0.1 runtime".to_string(),
-                    });
-                };
+                if let Expr::Name(name) = &**callee {
+                    if let Some(builtin_id) = builtin_id(&name.name) {
+                        for arg in args {
+                            self.lower_expr(arg)?;
+                        }
+                        self.code.push(OpCode::CallBuiltin as u8);
+                        self.code.push(builtin_id);
+                        self.code.push(args.len() as u8);
+                        return Ok(());
+                    }
+                    if let Some(fn_id) = self.ctx.fn_ids.get(&name.name).copied() {
+                        for arg in args {
+                            self.lower_expr(arg)?;
+                        }
+                        self.code.push(OpCode::CallFn as u8);
+                        self.code.extend_from_slice(&fn_id.to_le_bytes());
+                        self.code.push(args.len() as u8);
+                        return Ok(());
+                    }
+                    if let Some(slot) = self.locals.get(&name.name).copied() {
+                        self.code.push(OpCode::LoadLocal as u8);
+                        self.code.extend_from_slice(&slot.to_le_bytes());
+                        for arg in args {
+                            self.lower_expr(arg)?;
+                        }
+                        self.code.push(OpCode::CallClosure as u8);
+                        self.code.push(args.len() as u8);
+                        return Ok(());
+                    }
+                }
+
+                self.lower_expr(callee)?;
                 for arg in args {
                     self.lower_expr(arg)?;
                 }
-                if let Some(builtin_id) = builtin_id(&name.name) {
-                    self.code.push(OpCode::CallBuiltin as u8);
-                    self.code.push(builtin_id);
-                    self.code.push(args.len() as u8);
-                } else if let Some(fn_id) = self.ctx.fn_ids.get(&name.name).copied() {
-                    self.code.push(OpCode::CallFn as u8);
-                    self.code.extend_from_slice(&fn_id.to_le_bytes());
-                    self.code.push(args.len() as u8);
-                } else {
-                    return Err(BytecodeError {
-                        message: format!("unsupported call target `{}`", name.name),
-                    });
+                self.code.push(OpCode::CallClosure as u8);
+                self.code.push(args.len() as u8);
+            }
+            Expr::Lambda { params, body, .. } => {
+                let captures = capture_plan(&self.locals, params);
+                let lambda_id = self.compile_lambda(params, body, &captures)?;
+                for cap in &captures {
+                    let slot = self.locals.get(cap).ok_or_else(|| BytecodeError {
+                        message: format!("missing capture `{cap}` during lambda lowering"),
+                    })?;
+                    self.code.push(OpCode::LoadLocal as u8);
+                    self.code.extend_from_slice(&slot.to_le_bytes());
                 }
+                self.code.push(OpCode::MkClosure as u8);
+                self.code.extend_from_slice(&lambda_id.to_le_bytes());
+                self.code.push(captures.len() as u8);
             }
             Expr::Match { scrutinee, arms, .. } => {
                 self.lower_expr(scrutinee)?;
@@ -266,11 +308,7 @@ impl<'a> Lowerer<'a> {
                             }
                             self.lower_expr(&arm.expr)?;
                             for (name, prev) in bound.into_iter().rev() {
-                                if let Some(old_slot) = prev {
-                                    self.locals.insert(name, old_slot);
-                                } else {
-                                    self.locals.remove(&name);
-                                }
+                                restore_local(&mut self.locals, &name, prev);
                             }
                             let end_patch = self.emit_jump_placeholder(OpCode::Jump);
                             end_jumps.push(end_patch);
@@ -330,13 +368,41 @@ impl<'a> Lowerer<'a> {
                 self.code.extend_from_slice(&tag_id.to_le_bytes());
                 self.code.push(args.len() as u8);
             }
-            Expr::Lambda { .. } => {
-                return Err(BytecodeError {
-                    message: "expression form not supported by bytecode lowering yet".to_string(),
-                });
-            }
         }
         Ok(())
+    }
+
+    fn compile_lambda(
+        &mut self,
+        params: &[Param],
+        body: &Expr,
+        captures: &[String],
+    ) -> Result<u32, BytecodeError> {
+        let lambda_id = self.ctx.functions.len() as u32;
+        let mut locals = BTreeMap::new();
+        let mut slot = 0u32;
+        for cap in captures {
+            locals.insert(cap.clone(), slot);
+            slot += 1;
+        }
+        for p in params {
+            locals.insert(p.name.name.clone(), slot);
+            slot += 1;
+        }
+        let mut nested = Lowerer {
+            ctx: self.ctx,
+            code: Vec::new(),
+            locals,
+            next_local: slot,
+        };
+        nested.lower_expr(body)?;
+        nested.code.push(OpCode::Return as u8);
+        nested.ctx.functions.push(FunctionBytecode {
+            arity: params.len() as u8,
+            captures: captures.len() as u8,
+            code: nested.code,
+        });
+        Ok(lambda_id)
     }
 
     fn intern_string(&mut self, s: &str) -> u32 {
@@ -374,6 +440,26 @@ impl<'a> Lowerer<'a> {
         let target = self.code.len() as u32;
         self.code[patch_pos..patch_pos + 4].copy_from_slice(&target.to_le_bytes());
     }
+}
+
+fn restore_local(locals: &mut BTreeMap<String, u32>, name: &str, prev: Option<u32>) {
+    if let Some(old) = prev {
+        locals.insert(name.to_string(), old);
+    } else {
+        locals.remove(name);
+    }
+}
+
+fn capture_plan(locals: &BTreeMap<String, u32>, params: &[Param]) -> Vec<String> {
+    let param_names = params
+        .iter()
+        .map(|p| p.name.name.as_str())
+        .collect::<HashSet<_>>();
+    locals
+        .keys()
+        .filter(|name| !param_names.contains(name.as_str()))
+        .cloned()
+        .collect()
 }
 
 fn collect_ctors(program: &Program) -> HashSet<String> {
@@ -415,6 +501,7 @@ fn encode(strings: &[String], functions: &[FunctionBytecode], entry_fn: u32) -> 
     out.extend_from_slice(&(functions.len() as u32).to_le_bytes());
     for f in functions {
         out.push(f.arity);
+        out.push(f.captures);
         out.extend_from_slice(&(f.code.len() as u32).to_le_bytes());
         out.extend_from_slice(&f.code);
     }
