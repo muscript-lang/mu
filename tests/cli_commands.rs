@@ -111,6 +111,11 @@ fn run_command_executes_json_example() {
         "run should succeed for json example: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("{\"mu\":1}"),
+        "json example should print stringify(parse(...)) output, got: {stdout}"
+    );
 }
 
 #[test]
