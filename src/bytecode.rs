@@ -41,6 +41,7 @@ pub enum OpCode {
     MkClosure = 18,
     CallClosure = 19,
     Trap = 20,
+    ContractConst = 21,
 }
 
 #[derive(Debug, Clone)]
@@ -413,13 +414,13 @@ impl<'a> Lowerer<'a> {
             Expr::Require { expr, .. } => {
                 self.lower_expr(expr)?;
                 let msg_id = self.intern_string("contract require failure");
-                self.code.push(OpCode::AssertConst as u8);
+                self.code.push(OpCode::ContractConst as u8);
                 self.code.extend_from_slice(&msg_id.to_le_bytes());
             }
             Expr::Ensure { expr, .. } => {
                 self.lower_expr(expr)?;
                 let msg_id = self.intern_string("contract ensure failure");
-                self.code.push(OpCode::AssertConst as u8);
+                self.code.push(OpCode::ContractConst as u8);
                 self.code.extend_from_slice(&msg_id.to_le_bytes());
             }
             Expr::NameApp { name, args, .. } => {

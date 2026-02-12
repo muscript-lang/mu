@@ -301,6 +301,22 @@ pub fn run_bytecode(bytecode: &[u8], _args: &[String]) -> Result<(), VmError> {
                 }
                 stack.push(Value::Unit);
             }
+            x if x == OpCode::ContractConst as u8 => {
+                let msg_idx = read_u32(code, &mut frame.ip)? as usize;
+                let msg = strings.get(msg_idx).ok_or_else(|| VmError {
+                    message: "contract message index out of bounds".to_string(),
+                })?;
+                let cond = stack.pop().ok_or_else(|| VmError {
+                    message: "stack underflow in CONTRACT_CONST".to_string(),
+                })?;
+                let is_true = as_bool(cond)?;
+                if !is_true {
+                    return Err(VmError {
+                        message: with_code("E4002", &format!("contract failure: {msg}")),
+                    });
+                }
+                stack.push(Value::Unit);
+            }
             x if x == OpCode::AssertDyn as u8 => {
                 let msg = stack.pop().ok_or_else(|| VmError {
                     message: "stack underflow in ASSERT_DYN".to_string(),

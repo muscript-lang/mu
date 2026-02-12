@@ -72,7 +72,7 @@ fn bytecode_traps_on_assert_false() {
     let program = parse_str(src).expect("program should parse");
     let bc = compile(&program).expect("program should lower to bytecode");
     let err = run_bytecode(&bc, &[]).expect_err("assert false should trap");
-    assert!(err.to_string().contains("assert failure"));
+    assert!(err.to_string().contains("E4001"));
 }
 
 #[test]
@@ -81,6 +81,15 @@ fn bytecode_runs_require_and_ensure_true() {
     let program = parse_str(src).expect("program should parse");
     let bc = compile(&program).expect("program should lower to bytecode");
     run_bytecode(&bc, &[]).expect("contracts should run");
+}
+
+#[test]
+fn bytecode_traps_on_contract_failure() {
+    let src = "@x.reqbad{F main:()->i32={^f;0};}";
+    let program = parse_str(src).expect("program should parse");
+    let bc = compile(&program).expect("program should lower to bytecode");
+    let err = run_bytecode(&bc, &[]).expect_err("contract false should trap");
+    assert!(err.to_string().contains("E4002"));
 }
 
 #[test]
