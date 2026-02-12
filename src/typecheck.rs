@@ -159,11 +159,24 @@ fn build_module_sigs(programs: &[Program]) -> Result<BTreeMap<String, ModuleSigs
         for decl in &program.module.decls {
             match decl {
                 Decl::Import(d) => {
-                    imports.insert(d.alias.name.clone(), modid_to_string(&d.module.parts));
+                    let prev = imports.insert(d.alias.name.clone(), modid_to_string(&d.module.parts));
+                    if prev.is_some() {
+                        return Err(TypeError {
+                            code: TypeErrorCode::DuplicateSymbol,
+                            span: d.span,
+                            message: format!("duplicate import alias `{}`", d.alias.name),
+                        });
+                    }
                 }
                 Decl::Export(d) => {
                     for name in &d.names {
-                        exports.insert(name.name.clone());
+                        if !exports.insert(name.name.clone()) {
+                            return Err(TypeError {
+                                code: TypeErrorCode::DuplicateSymbol,
+                                span: name.span,
+                                message: format!("duplicate export name `{}`", name.name),
+                            });
+                        }
                     }
                 }
                 Decl::Type(d) => {

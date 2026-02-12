@@ -134,3 +134,23 @@ fn numeric_operator_rejects_wrong_arg_types() {
     let err = check_program(&program).expect_err("wrong arg types should fail");
     assert_eq!(err.code, TypeErrorCode::TypeMismatch);
 }
+
+#[test]
+fn duplicate_export_name_is_rejected() {
+    let src = "@m.ex{E[x,x];V x:i32=0;F main:()->i32=0;}";
+    let program = parse_str(src).expect("program should parse");
+    let err = check_program(&program).expect_err("duplicate export should fail");
+    assert_eq!(err.code, TypeErrorCode::DuplicateSymbol);
+}
+
+#[test]
+fn duplicate_import_alias_is_rejected() {
+    let main_src = "@main.app{:x=dep.one;:x=dep.two;F main:()->i32=0;}";
+    let dep_one = "@dep.one{F main:()->i32=0;}";
+    let dep_two = "@dep.two{F main:()->i32=0;}";
+    let p0 = parse_str(main_src).expect("main parses");
+    let p1 = parse_str(dep_one).expect("dep one parses");
+    let p2 = parse_str(dep_two).expect("dep two parses");
+    let err = check_programs(&[p0, p1, p2]).expect_err("duplicate import alias should fail");
+    assert_eq!(err.code, TypeErrorCode::DuplicateSymbol);
+}
