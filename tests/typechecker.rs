@@ -242,6 +242,14 @@ fn equality_rejects_mismatched_operand_types() {
 }
 
 #[test]
+fn equality_rejects_function_values() {
+    let src = "@m.eqfn{F main:()->i32={a(c(==,l(x:i32):i32=x,l(y:i32):i32=y));0};}";
+    let program = parse_str(src).expect("program should parse");
+    let err = check_program(&program).expect_err("function equality should fail");
+    assert_eq!(err.code, TypeErrorCode::TypeMismatch);
+}
+
+#[test]
 fn result_builtin_patterns_typecheck_without_user_declared_res() {
     let src = "@m.resok{F main:()->i32=m(c(parse,\"{}\")){Ok(j)=>0;Er(e)=>1;};}";
     let program = parse_str(src).expect("program should parse");
