@@ -144,6 +144,36 @@ fn run_command_executes_built_mub() {
 }
 
 #[test]
+fn run_command_executes_built_json_mub() {
+    let exe = env!("CARGO_BIN_EXE_muc");
+    let out = unique_temp_mub_file("json_run");
+
+    let build = Command::new(exe)
+        .args([
+            "build",
+            "examples/json.mu",
+            "-o",
+            out.to_str().expect("temp path should be valid utf8"),
+        ])
+        .output()
+        .expect("binary should run");
+    assert!(build.status.success(), "json build should succeed");
+
+    let run = Command::new(exe)
+        .args(["run", out.to_str().expect("temp path should be valid utf8")])
+        .output()
+        .expect("binary should run");
+    assert!(run.status.success(), "run on json .mub should succeed");
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        stdout.contains("{\"mu\":1}"),
+        "json .mub run should print roundtrip output, got: {stdout}"
+    );
+
+    let _ = fs::remove_file(out);
+}
+
+#[test]
 fn run_loads_local_modules_for_import_validation() {
     let exe = env!("CARGO_BIN_EXE_muc");
     let dir = unique_temp_dir("run_imports");
