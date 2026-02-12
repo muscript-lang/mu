@@ -24,6 +24,20 @@ F main:()->i32=0;
 V x:i32=v(y:i32=1,v(z:i32=2,z));
 V b:i32=i(t,1,0);
 V m:i32=m(t){t=>1;f=>0;};
+V y:i32=v(fn1=l(a:i32):i32=a,c(fn1,1));
+}
+```
+
+## Contracts and asserts
+
+```mu
+@demo.contracts{
+F main:()->i32={
+    a(t,"ok");
+    ^t;
+    _ t;
+    0
+};
 }
 ```
 
@@ -39,6 +53,13 @@ To rewrite source files to canonical form:
 
 ```bash
 cargo run -- fmt examples
+```
+
+## Bytecode run
+
+```bash
+cargo run -- build examples/hello.mu -o hello.mub
+cargo run -- run hello.mub
 ```
 
 ## Type and effect checking

@@ -39,7 +39,13 @@ cargo run -- run examples/hello.mu
 cargo run -- build examples/hello.mu -o hello.mub
 ```
 
-6. Run tests:
+6. Run bytecode directly:
+
+```bash
+cargo run -- run hello.mub
+```
+
+7. Run tests:
 
 ```bash
 cargo test
@@ -49,5 +55,5 @@ cargo test
 
 - `muc fmt <file|dir> [--check]`
 - `muc check <file|dir>`
-- `muc run <file.mu> [-- args...]` (compiles to bytecode and executes)
+- `muc run <file.mu|file.mub> [-- args...]`
 - `muc build <file.mu> -o out.mub`
