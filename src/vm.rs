@@ -695,6 +695,50 @@ fn call_builtin(id: u8, args: &[Value]) -> Result<Value, VmError> {
             };
             Ok(Value::Bool(!v))
         }
+        34 => {
+            if args.len() != 1 {
+                return Err(VmError {
+                    message: "neg expects one argument".to_string(),
+                });
+            }
+            let Value::Int(v) = args[0] else {
+                return Err(VmError {
+                    message: "neg expects integer arguments".to_string(),
+                });
+            };
+            Ok(Value::Int(-v))
+        }
+        35 => {
+            if args.len() != 2 {
+                return Err(VmError {
+                    message: "str_cat expects two arguments".to_string(),
+                });
+            }
+            let Value::String(a) = &args[0] else {
+                return Err(VmError {
+                    message: "str_cat expects string arguments".to_string(),
+                });
+            };
+            let Value::String(b) = &args[1] else {
+                return Err(VmError {
+                    message: "str_cat expects string arguments".to_string(),
+                });
+            };
+            Ok(Value::String(format!("{a}{b}")))
+        }
+        36 => {
+            if args.len() != 1 {
+                return Err(VmError {
+                    message: "len expects one argument".to_string(),
+                });
+            }
+            let Value::String(s) = &args[0] else {
+                return Err(VmError {
+                    message: "len expects string arguments".to_string(),
+                });
+            };
+            Ok(Value::Int(s.chars().count() as i64))
+        }
         _ => Err(VmError {
             message: format!("unknown builtin id {id}"),
         }),

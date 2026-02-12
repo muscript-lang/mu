@@ -571,6 +571,9 @@ fn builtin_id(name: &str) -> Option<u8> {
         "and" => Some(31),
         "or" => Some(32),
         "not" => Some(33),
+        "neg" => Some(34),
+        "str_cat" => Some(35),
+        "len" => Some(36),
         _ => None,
     }
 }

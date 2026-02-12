@@ -180,3 +180,19 @@ fn bytecode_traps_on_invalid_match() {
     let err = run_bytecode(&bc, &[]).expect_err("invalid match should trap");
     assert!(err.to_string().contains("E4005"));
 }
+
+#[test]
+fn bytecode_runs_neg_builtin() {
+    let src = "@x.neg{F main:()->i32={c(neg,1);0};}";
+    let program = parse_str(src).expect("program should parse");
+    let bc = compile(&program).expect("program should lower to bytecode");
+    run_bytecode(&bc, &[]).expect("neg builtin should run");
+}
+
+#[test]
+fn bytecode_runs_string_helpers() {
+    let src = "@x.str{F main:()->i32={c(str_cat,\"a\",\"b\");c(len,\"abc\");0};}";
+    let program = parse_str(src).expect("program should parse");
+    let bc = compile(&program).expect("program should lower to bytecode");
+    run_bytecode(&bc, &[]).expect("str_cat and len builtins should run");
+}

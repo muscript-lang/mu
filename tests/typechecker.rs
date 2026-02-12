@@ -197,6 +197,36 @@ fn numeric_operator_rejects_wrong_arg_types() {
 }
 
 #[test]
+fn prelude_neg_typechecks_for_i32() {
+    let src = "@m.negok{F main:()->i32=c(neg,1);}";
+    let program = parse_str(src).expect("program should parse");
+    check_program(&program).expect("neg should typecheck for i32");
+}
+
+#[test]
+fn prelude_neg_rejects_non_i32() {
+    let src = "@m.negbad{F main:()->i32=c(neg,t);}";
+    let program = parse_str(src).expect("program should parse");
+    let err = check_program(&program).expect_err("neg should reject bool");
+    assert_eq!(err.code, TypeErrorCode::TypeMismatch);
+}
+
+#[test]
+fn prelude_string_helpers_typecheck() {
+    let src = "@m.strok{F main:()->i32={c(str_cat,\"a\",\"b\");c(len,\"abc\");0};}";
+    let program = parse_str(src).expect("program should parse");
+    check_program(&program).expect("str_cat and len should typecheck for strings");
+}
+
+#[test]
+fn prelude_len_rejects_non_string() {
+    let src = "@m.lenbad{F main:()->i32=c(len,1);}";
+    let program = parse_str(src).expect("program should parse");
+    let err = check_program(&program).expect_err("len should reject integers");
+    assert_eq!(err.code, TypeErrorCode::TypeMismatch);
+}
+
+#[test]
 fn duplicate_export_name_is_rejected() {
     let src = "@m.ex{E[x,x];V x:i32=0;F main:()->i32=0;}";
     let program = parse_str(src).expect("program should parse");
