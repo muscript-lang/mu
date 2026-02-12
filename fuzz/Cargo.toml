@@ -1,0 +1,47 @@
+[package]
+name = "muc-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+muc = { path = ".." }
+
+[[bin]]
+name = "fuzz_lexer"
+path = "fuzz_targets/fuzz_lexer.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_parser"
+path = "fuzz_targets/fuzz_parser.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_fmt_roundtrip"
+path = "fuzz_targets/fuzz_fmt_roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_bytecode_decode"
+path = "fuzz_targets/fuzz_bytecode_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_vm_step"
+path = "fuzz_targets/fuzz_vm_step.rs"
+test = false
+doc = false
+bench = false

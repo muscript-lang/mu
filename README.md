@@ -1,5 +1,8 @@
 # muScript v0.1
 
+![CI](https://img.shields.io/badge/ci-fast%20checks-blue)
+![Fuzz (manual)](https://img.shields.io/badge/fuzz-manual-orange)
+
 `muc` is the reference µScript v0.1 toolchain in Rust.
 It includes:
 - Lexer + parser for the EBNF grammar
@@ -67,6 +70,23 @@ cargo run -- run http.mub
 cargo test
 ```
 
+8. Run semantics/bytecode golden suites:
+
+```bash
+cargo test semantics_goldens
+cargo test bytecode_golden
+```
+
+9. Run fuzz locally (nightly + cargo-fuzz):
+
+```bash
+cargo +nightly fuzz run fuzz_lexer -- -max_total_time=30
+cargo +nightly fuzz run fuzz_parser -- -max_total_time=30
+cargo +nightly fuzz run fuzz_fmt_roundtrip -- -max_total_time=30
+cargo +nightly fuzz run fuzz_bytecode_decode -- -max_total_time=30
+cargo +nightly fuzz run fuzz_vm_step -- -max_total_time=30
+```
+
 ## CLI
 
 - `muc fmt <file|dir> [--check]`
@@ -83,9 +103,8 @@ Example modules:
 
 CI enforces:
 - `cargo fmt --all -- --check`
-- `cargo clippy --all-targets -- -D warnings`
-- `cargo test --all-targets`
+- `cargo test`
 - `cargo run -- fmt --check .`
-- `cargo run -- check examples`
-- `cargo run -- run examples/{hello,json,http}.mu`
-- `cargo run -- build ...` and `cargo run -- run ...` for `hello/json/http` `.mub` artifacts
+
+Manual workflow:
+- `fuzz` workflow dispatch runs each fuzz target for a short smoke duration

@@ -18,6 +18,56 @@ impl fmt::Display for BytecodeError {
 
 impl std::error::Error for BytecodeError {}
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecodeErrorCode {
+    InvalidHeader,
+    Truncated,
+    InvalidUtf8,
+    InvalidLength,
+    InvalidIndex,
+    InvalidJumpTarget,
+    UnknownOpcode,
+    UnknownBuiltin,
+    TrailingBytes,
+}
+
+impl DecodeErrorCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DecodeErrorCode::InvalidHeader => "E4101",
+            DecodeErrorCode::Truncated => "E4102",
+            DecodeErrorCode::InvalidUtf8 => "E4103",
+            DecodeErrorCode::InvalidLength => "E4104",
+            DecodeErrorCode::InvalidIndex => "E4105",
+            DecodeErrorCode::InvalidJumpTarget => "E4106",
+            DecodeErrorCode::UnknownOpcode => "E4107",
+            DecodeErrorCode::UnknownBuiltin => "E4108",
+            DecodeErrorCode::TrailingBytes => "E4109",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DecodeError {
+    pub code: DecodeErrorCode,
+    pub offset: usize,
+    pub message: String,
+}
+
+impl fmt::Display for DecodeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}: {} at byte {}",
+            self.code.as_str(),
+            self.message,
+            self.offset
+        )
+    }
+}
+
+impl std::error::Error for DecodeError {}
+
 #[derive(Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum OpCode {
@@ -44,11 +94,47 @@ pub enum OpCode {
     ContractConst = 21,
 }
 
+impl OpCode {
+    pub fn from_byte(value: u8) -> Option<Self> {
+        match value {
+            1 => Some(OpCode::PushInt),
+            2 => Some(OpCode::PushBool),
+            3 => Some(OpCode::PushString),
+            4 => Some(OpCode::PushUnit),
+            5 => Some(OpCode::LoadLocal),
+            6 => Some(OpCode::StoreLocal),
+            7 => Some(OpCode::Pop),
+            8 => Some(OpCode::Jump),
+            9 => Some(OpCode::JumpIfFalse),
+            10 => Some(OpCode::CallBuiltin),
+            11 => Some(OpCode::Return),
+            12 => Some(OpCode::MkAdt),
+            13 => Some(OpCode::JumpIfTag),
+            14 => Some(OpCode::AssertConst),
+            15 => Some(OpCode::AssertDyn),
+            16 => Some(OpCode::GetAdtField),
+            17 => Some(OpCode::CallFn),
+            18 => Some(OpCode::MkClosure),
+            19 => Some(OpCode::CallClosure),
+            20 => Some(OpCode::Trap),
+            21 => Some(OpCode::ContractConst),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FunctionBytecode {
     pub arity: u8,
     pub captures: u8,
     pub code: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DecodedBytecode {
+    pub strings: Vec<String>,
+    pub functions: Vec<FunctionBytecode>,
+    pub entry_fn: u32,
 }
 
 #[derive(Default)]
@@ -121,10 +207,13 @@ pub fn compile(program: &Program) -> Result<Vec<u8>, BytecodeError> {
         message: "missing `main` function".to_string(),
     })?;
 
-    Ok(encode(&ctx.strings, &ctx.functions, entry_fn))
+    Ok(encode_parts(&ctx.strings, &ctx.functions, entry_fn))
 }
 
-fn lower_top_function(ctx: &mut CompileCtx, f: &FunctionDecl) -> Result<FunctionBytecode, BytecodeError> {
+fn lower_top_function(
+    ctx: &mut CompileCtx,
+    f: &FunctionDecl,
+) -> Result<FunctionBytecode, BytecodeError> {
     let mut locals = BTreeMap::new();
     for i in 0..f.sig.params.len() {
         locals.insert(format!("arg{i}"), i as u32);
@@ -282,7 +371,9 @@ impl<'a> Lowerer<'a> {
                 self.code.extend_from_slice(&lambda_id.to_le_bytes());
                 self.code.push(captures.len() as u8);
             }
-            Expr::Match { scrutinee, arms, .. } => {
+            Expr::Match {
+                scrutinee, arms, ..
+            } => {
                 self.lower_expr(scrutinee)?;
                 let scrut_slot = self.alloc_local();
                 self.code.push(OpCode::StoreLocal as u8);
@@ -580,7 +671,293 @@ fn builtin_id(name: &str) -> Option<u8> {
     }
 }
 
-fn encode(strings: &[String], functions: &[FunctionBytecode], entry_fn: u32) -> Vec<u8> {
+fn builtin_name(id: u8) -> Option<&'static str> {
+    match id {
+        1 => Some("print"),
+        2 => Some("println"),
+        3 => Some("readln"),
+        4 => Some("read"),
+        5 => Some("write"),
+        6 => Some("parse"),
+        7 => Some("stringify"),
+        8 => Some("run"),
+        9 => Some("get"),
+        20 => Some("+"),
+        21 => Some("-"),
+        22 => Some("*"),
+        23 => Some("/"),
+        24 => Some("%"),
+        25 => Some("=="),
+        26 => Some("!="),
+        27 => Some("<"),
+        28 => Some("<="),
+        29 => Some(">"),
+        30 => Some(">="),
+        31 => Some("and"),
+        32 => Some("or"),
+        33 => Some("not"),
+        34 => Some("neg"),
+        35 => Some("str_cat"),
+        36 => Some("len"),
+        _ => None,
+    }
+}
+
+pub fn encode(decoded: &DecodedBytecode) -> Vec<u8> {
+    encode_parts(&decoded.strings, &decoded.functions, decoded.entry_fn)
+}
+
+pub fn decode(bytecode: &[u8]) -> Result<DecodedBytecode, DecodeError> {
+    let mut cursor = 0usize;
+    if bytecode.len() < 4 || &bytecode[0..4] != MAGIC {
+        return Err(DecodeError {
+            code: DecodeErrorCode::InvalidHeader,
+            offset: 0,
+            message: "invalid bytecode header".to_string(),
+        });
+    }
+    cursor += 4;
+
+    let nstrings = read_u32(bytecode, &mut cursor)? as usize;
+    let remain = bytecode.len().saturating_sub(cursor);
+    if nstrings > remain / 4 {
+        return Err(DecodeError {
+            code: DecodeErrorCode::InvalidLength,
+            offset: cursor,
+            message: "string table count exceeds stream capacity".to_string(),
+        });
+    }
+    let mut strings = Vec::with_capacity(nstrings);
+    for _ in 0..nstrings {
+        let len = read_u32(bytecode, &mut cursor)? as usize;
+        let end = cursor.checked_add(len).ok_or_else(|| DecodeError {
+            code: DecodeErrorCode::InvalidLength,
+            offset: cursor,
+            message: "string length overflow".to_string(),
+        })?;
+        if end > bytecode.len() {
+            return Err(DecodeError {
+                code: DecodeErrorCode::Truncated,
+                offset: cursor,
+                message: "corrupt bytecode string table".to_string(),
+            });
+        }
+        let s = std::str::from_utf8(&bytecode[cursor..end]).map_err(|_| DecodeError {
+            code: DecodeErrorCode::InvalidUtf8,
+            offset: cursor,
+            message: "bytecode string table contains invalid utf-8".to_string(),
+        })?;
+        strings.push(s.to_string());
+        cursor = end;
+    }
+
+    let nfuncs = read_u32(bytecode, &mut cursor)? as usize;
+    let remain = bytecode.len().saturating_sub(cursor);
+    if nfuncs > remain / 6 {
+        return Err(DecodeError {
+            code: DecodeErrorCode::InvalidLength,
+            offset: cursor,
+            message: "function table count exceeds stream capacity".to_string(),
+        });
+    }
+    let mut functions = Vec::with_capacity(nfuncs);
+    for _ in 0..nfuncs {
+        let arity = read_u8(bytecode, &mut cursor)?;
+        let captures = read_u8(bytecode, &mut cursor)?;
+        let code_len = read_u32(bytecode, &mut cursor)? as usize;
+        let end = cursor.checked_add(code_len).ok_or_else(|| DecodeError {
+            code: DecodeErrorCode::InvalidLength,
+            offset: cursor,
+            message: "function code length overflow".to_string(),
+        })?;
+        if end > bytecode.len() {
+            return Err(DecodeError {
+                code: DecodeErrorCode::Truncated,
+                offset: cursor,
+                message: "corrupt bytecode function section".to_string(),
+            });
+        }
+        functions.push(FunctionBytecode {
+            arity,
+            captures,
+            code: bytecode[cursor..end].to_vec(),
+        });
+        cursor = end;
+    }
+
+    let entry_fn = read_u32(bytecode, &mut cursor)?;
+    if cursor != bytecode.len() {
+        return Err(DecodeError {
+            code: DecodeErrorCode::TrailingBytes,
+            offset: cursor,
+            message: "trailing bytes in bytecode stream".to_string(),
+        });
+    }
+    if entry_fn as usize >= functions.len() {
+        return Err(DecodeError {
+            code: DecodeErrorCode::InvalidIndex,
+            offset: cursor.saturating_sub(4),
+            message: "entry function index out of bounds".to_string(),
+        });
+    }
+
+    validate_function_code(&strings, &functions)?;
+
+    Ok(DecodedBytecode {
+        strings,
+        functions,
+        entry_fn,
+    })
+}
+
+fn validate_function_code(
+    strings: &[String],
+    functions: &[FunctionBytecode],
+) -> Result<(), DecodeError> {
+    for function in functions {
+        let code = &function.code;
+        let mut ip = 0usize;
+        while ip < code.len() {
+            let op_offset = ip;
+            let op = read_u8(code, &mut ip)?;
+            let decoded = OpCode::from_byte(op).ok_or_else(|| DecodeError {
+                code: DecodeErrorCode::UnknownOpcode,
+                offset: op_offset,
+                message: format!("unknown opcode {op}"),
+            })?;
+            match decoded {
+                OpCode::PushInt => {
+                    let _ = read_i64(code, &mut ip)?;
+                }
+                OpCode::PushBool => {
+                    let _ = read_u8(code, &mut ip)?;
+                }
+                OpCode::PushString | OpCode::AssertConst | OpCode::Trap | OpCode::ContractConst => {
+                    let idx = read_u32(code, &mut ip)? as usize;
+                    if idx >= strings.len() {
+                        return Err(DecodeError {
+                            code: DecodeErrorCode::InvalidIndex,
+                            offset: op_offset,
+                            message: "string index out of bounds".to_string(),
+                        });
+                    }
+                }
+                OpCode::PushUnit | OpCode::Pop | OpCode::Return | OpCode::AssertDyn => {}
+                OpCode::LoadLocal | OpCode::StoreLocal => {
+                    let _ = read_u32(code, &mut ip)?;
+                }
+                OpCode::Jump | OpCode::JumpIfFalse => {
+                    let target = read_u32(code, &mut ip)? as usize;
+                    if target > code.len() {
+                        return Err(DecodeError {
+                            code: DecodeErrorCode::InvalidJumpTarget,
+                            offset: op_offset,
+                            message: "jump target out of bounds".to_string(),
+                        });
+                    }
+                }
+                OpCode::CallBuiltin => {
+                    let id = read_u8(code, &mut ip)?;
+                    let _ = read_u8(code, &mut ip)?;
+                    if builtin_name(id).is_none() {
+                        return Err(DecodeError {
+                            code: DecodeErrorCode::UnknownBuiltin,
+                            offset: op_offset,
+                            message: format!("unknown builtin id {id}"),
+                        });
+                    }
+                }
+                OpCode::MkAdt => {
+                    let tag_idx = read_u32(code, &mut ip)? as usize;
+                    let _ = read_u8(code, &mut ip)?;
+                    if tag_idx >= strings.len() {
+                        return Err(DecodeError {
+                            code: DecodeErrorCode::InvalidIndex,
+                            offset: op_offset,
+                            message: "adt tag index out of bounds".to_string(),
+                        });
+                    }
+                }
+                OpCode::JumpIfTag => {
+                    let tag_idx = read_u32(code, &mut ip)? as usize;
+                    let target = read_u32(code, &mut ip)? as usize;
+                    if tag_idx >= strings.len() {
+                        return Err(DecodeError {
+                            code: DecodeErrorCode::InvalidIndex,
+                            offset: op_offset,
+                            message: "adt tag index out of bounds".to_string(),
+                        });
+                    }
+                    if target > code.len() {
+                        return Err(DecodeError {
+                            code: DecodeErrorCode::InvalidJumpTarget,
+                            offset: op_offset,
+                            message: "jump target out of bounds".to_string(),
+                        });
+                    }
+                }
+                OpCode::GetAdtField | OpCode::CallClosure => {
+                    let _ = read_u8(code, &mut ip)?;
+                }
+                OpCode::CallFn | OpCode::MkClosure => {
+                    let fn_id = read_u32(code, &mut ip)? as usize;
+                    let _ = read_u8(code, &mut ip)?;
+                    if fn_id >= functions.len() {
+                        return Err(DecodeError {
+                            code: DecodeErrorCode::InvalidIndex,
+                            offset: op_offset,
+                            message: "function id out of bounds".to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn read_u8(bytes: &[u8], cursor: &mut usize) -> Result<u8, DecodeError> {
+    if *cursor >= bytes.len() {
+        return Err(DecodeError {
+            code: DecodeErrorCode::Truncated,
+            offset: *cursor,
+            message: "truncated bytecode".to_string(),
+        });
+    }
+    let v = bytes[*cursor];
+    *cursor += 1;
+    Ok(v)
+}
+
+fn read_u32(bytes: &[u8], cursor: &mut usize) -> Result<u32, DecodeError> {
+    if *cursor + 4 > bytes.len() {
+        return Err(DecodeError {
+            code: DecodeErrorCode::Truncated,
+            offset: *cursor,
+            message: "truncated bytecode".to_string(),
+        });
+    }
+    let mut buf = [0u8; 4];
+    buf.copy_from_slice(&bytes[*cursor..*cursor + 4]);
+    *cursor += 4;
+    Ok(u32::from_le_bytes(buf))
+}
+
+fn read_i64(bytes: &[u8], cursor: &mut usize) -> Result<i64, DecodeError> {
+    if *cursor + 8 > bytes.len() {
+        return Err(DecodeError {
+            code: DecodeErrorCode::Truncated,
+            offset: *cursor,
+            message: "truncated bytecode".to_string(),
+        });
+    }
+    let mut buf = [0u8; 8];
+    buf.copy_from_slice(&bytes[*cursor..*cursor + 8]);
+    *cursor += 8;
+    Ok(i64::from_le_bytes(buf))
+}
+
+fn encode_parts(strings: &[String], functions: &[FunctionBytecode], entry_fn: u32) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(MAGIC);
     out.extend_from_slice(&(strings.len() as u32).to_le_bytes());

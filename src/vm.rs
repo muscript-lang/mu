@@ -1,15 +1,8 @@
+use std::collections::BTreeMap;
 use std::fmt;
 use std::io::Read;
-use std::collections::BTreeMap;
 
-use crate::bytecode::{MAGIC, OpCode};
-
-#[derive(Debug, Clone)]
-struct FunctionBlob {
-    arity: u8,
-    captures: u8,
-    code: Vec<u8>,
-}
+use crate::bytecode::{self, OpCode};
 
 #[derive(Debug, Clone, PartialEq)]
 enum Value {
@@ -44,8 +37,137 @@ impl fmt::Display for VmError {
 
 impl std::error::Error for VmError {}
 
-pub fn run_bytecode(bytecode: &[u8], _args: &[String]) -> Result<(), VmError> {
-    let (strings, functions, entry_fn) = decode(bytecode)?;
+pub const DEFAULT_FUEL: u64 = 10_000_000;
+
+pub trait VmHost {
+    fn io_print(&mut self, text: &str) -> Result<(), VmError>;
+    fn io_println(&mut self, text: &str) -> Result<(), VmError>;
+    fn io_readln(&mut self) -> Result<String, VmError>;
+    fn fs_read_to_string(&mut self, path: &str) -> Result<String, String>;
+    fn fs_write_string(&mut self, path: &str, data: &str) -> Result<(), String>;
+    fn proc_run(&mut self, cmd: &str, args: &[String]) -> Result<i32, String>;
+    fn http_get(&mut self, url: &str) -> Result<String, String>;
+}
+
+#[derive(Default)]
+pub struct RealHost;
+
+pub struct FuzzHost;
+
+impl VmHost for RealHost {
+    fn io_print(&mut self, text: &str) -> Result<(), VmError> {
+        print!("{text}");
+        Ok(())
+    }
+
+    fn io_println(&mut self, text: &str) -> Result<(), VmError> {
+        println!("{text}");
+        Ok(())
+    }
+
+    fn io_readln(&mut self) -> Result<String, VmError> {
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line).map_err(|e| VmError {
+            message: format!("readln failed: {e}"),
+        })?;
+        if line.ends_with('\n') {
+            line.pop();
+            if line.ends_with('\r') {
+                line.pop();
+            }
+        }
+        Ok(line)
+    }
+
+    fn fs_read_to_string(&mut self, path: &str) -> Result<String, String> {
+        std::fs::read_to_string(path).map_err(|e| format!("read failed: {e}"))
+    }
+
+    fn fs_write_string(&mut self, path: &str, data: &str) -> Result<(), String> {
+        std::fs::write(path, data).map_err(|e| format!("write failed: {e}"))
+    }
+
+    fn proc_run(&mut self, cmd: &str, args: &[String]) -> Result<i32, String> {
+        let mut child = std::process::Command::new(cmd);
+        for arg in args {
+            child.arg(arg);
+        }
+        child
+            .status()
+            .map(|status| status.code().unwrap_or(-1))
+            .map_err(|e| format!("run failed: {e}"))
+    }
+
+    fn http_get(&mut self, url: &str) -> Result<String, String> {
+        match ureq::get(url).call() {
+            Ok(mut response) => {
+                let mut body = String::new();
+                response
+                    .body_mut()
+                    .as_reader()
+                    .read_to_string(&mut body)
+                    .map_err(|e| format!("get body read failed: {e}"))?;
+                Ok(body)
+            }
+            Err(e) => Err(format!("get failed: {e}")),
+        }
+    }
+}
+
+impl VmHost for FuzzHost {
+    fn io_print(&mut self, _text: &str) -> Result<(), VmError> {
+        Ok(())
+    }
+
+    fn io_println(&mut self, _text: &str) -> Result<(), VmError> {
+        Ok(())
+    }
+
+    fn io_readln(&mut self) -> Result<String, VmError> {
+        Err(VmError {
+            message: "fuzz host: readln disabled".to_string(),
+        })
+    }
+
+    fn fs_read_to_string(&mut self, _path: &str) -> Result<String, String> {
+        Err("fuzz host: fs read disabled".to_string())
+    }
+
+    fn fs_write_string(&mut self, _path: &str, _data: &str) -> Result<(), String> {
+        Err("fuzz host: fs write disabled".to_string())
+    }
+
+    fn proc_run(&mut self, _cmd: &str, _args: &[String]) -> Result<i32, String> {
+        Err("fuzz host: proc run disabled".to_string())
+    }
+
+    fn http_get(&mut self, _url: &str) -> Result<String, String> {
+        Err("fuzz host: http get disabled".to_string())
+    }
+}
+
+pub fn run_bytecode(bytecode: &[u8], args: &[String]) -> Result<(), VmError> {
+    let mut host = RealHost;
+    run_bytecode_with_fuel_and_host(bytecode, args, DEFAULT_FUEL, &mut host)
+}
+
+pub fn run_bytecode_with_fuel(bytecode: &[u8], args: &[String], fuel: u64) -> Result<(), VmError> {
+    let mut host = RealHost;
+    run_bytecode_with_fuel_and_host(bytecode, args, fuel, &mut host)
+}
+
+pub fn run_bytecode_with_fuel_and_host<H: VmHost>(
+    bytecode: &[u8],
+    _args: &[String],
+    mut fuel: u64,
+    host: &mut H,
+) -> Result<(), VmError> {
+    let decoded = bytecode::decode(bytecode).map_err(|e| VmError {
+        message: e.to_string(),
+    })?;
+    let strings = decoded.strings;
+    let functions = decoded.functions;
+    let entry_fn = decoded.entry_fn;
     let entry_idx = entry_fn as usize;
     if entry_idx >= functions.len() {
         return Err(VmError {
@@ -66,6 +188,12 @@ pub fn run_bytecode(bytecode: &[u8], _args: &[String]) -> Result<(), VmError> {
     }];
 
     while !frames.is_empty() {
+        if fuel == 0 {
+            return Err(VmError {
+                message: with_code("E4007", "execution fuel exhausted"),
+            });
+        }
+        fuel -= 1;
         let frame = frames.last_mut().expect("checked non-empty");
         let func = &functions[frame.fn_id];
         let code = &func.code;
@@ -156,7 +284,7 @@ pub fn run_bytecode(bytecode: &[u8], _args: &[String]) -> Result<(), VmError> {
                     });
                 }
                 let args = stack.split_off(stack.len() - argc);
-                let result = call_builtin(id, &args)?;
+                let result = call_builtin(host, id, &args)?;
                 stack.push(result);
             }
             x if x == OpCode::CallFn as u8 => {
@@ -371,7 +499,10 @@ pub fn run_bytecode(bytecode: &[u8], _args: &[String]) -> Result<(), VmError> {
                     };
                     if code != 0 {
                         return Err(VmError {
-                            message: with_code("E4006", &format!("program exited with status {code}")),
+                            message: with_code(
+                                "E4006",
+                                &format!("program exited with status {code}"),
+                            ),
                         });
                     }
                     return Ok(());
@@ -391,60 +522,6 @@ pub fn run_bytecode(bytecode: &[u8], _args: &[String]) -> Result<(), VmError> {
     })
 }
 
-fn decode(bytecode: &[u8]) -> Result<(Vec<String>, Vec<FunctionBlob>, u32), VmError> {
-    let mut cursor = 0usize;
-    if bytecode.len() < 4 || &bytecode[0..4] != MAGIC {
-        return Err(VmError {
-            message: "invalid bytecode header".to_string(),
-        });
-    }
-    cursor += 4;
-
-    let nstrings = read_u32(bytecode, &mut cursor)? as usize;
-    let mut strings = Vec::with_capacity(nstrings);
-    for _ in 0..nstrings {
-        let len = read_u32(bytecode, &mut cursor)? as usize;
-        if cursor + len > bytecode.len() {
-            return Err(VmError {
-                message: "corrupt bytecode string table".to_string(),
-            });
-        }
-        let s = std::str::from_utf8(&bytecode[cursor..cursor + len]).map_err(|_| VmError {
-            message: "bytecode string table contains invalid utf-8".to_string(),
-        })?;
-        strings.push(s.to_string());
-        cursor += len;
-    }
-
-    let nfuncs = read_u32(bytecode, &mut cursor)? as usize;
-    let mut functions = Vec::with_capacity(nfuncs);
-    for _ in 0..nfuncs {
-        let arity = read_u8(bytecode, &mut cursor)?;
-        let captures = read_u8(bytecode, &mut cursor)?;
-        let code_len = read_u32(bytecode, &mut cursor)? as usize;
-        if cursor + code_len > bytecode.len() {
-            return Err(VmError {
-                message: "corrupt bytecode function section".to_string(),
-            });
-        }
-        let code = bytecode[cursor..cursor + code_len].to_vec();
-        cursor += code_len;
-        functions.push(FunctionBlob {
-            arity,
-            captures,
-            code,
-        });
-    }
-
-    let entry = read_u32(bytecode, &mut cursor)?;
-    if cursor != bytecode.len() {
-        return Err(VmError {
-            message: "trailing bytes in bytecode stream".to_string(),
-        });
-    }
-    Ok((strings, functions, entry))
-}
-
 fn as_bool(value: Value) -> Result<bool, VmError> {
     match value {
         Value::Bool(v) => Ok(v),
@@ -454,7 +531,7 @@ fn as_bool(value: Value) -> Result<bool, VmError> {
     }
 }
 
-fn call_builtin(id: u8, args: &[Value]) -> Result<Value, VmError> {
+fn call_builtin<H: VmHost>(host: &mut H, id: u8, args: &[Value]) -> Result<Value, VmError> {
     match id {
         1 => {
             if args.len() != 1 {
@@ -467,7 +544,7 @@ fn call_builtin(id: u8, args: &[Value]) -> Result<Value, VmError> {
                     message: "print expects a string".to_string(),
                 });
             };
-            print!("{s}");
+            host.io_print(s)?;
             Ok(Value::Unit)
         }
         2 => {
@@ -481,7 +558,7 @@ fn call_builtin(id: u8, args: &[Value]) -> Result<Value, VmError> {
                     message: "println expects a string".to_string(),
                 });
             };
-            println!("{s}");
+            host.io_println(s)?;
             Ok(Value::Unit)
         }
         3 => {
@@ -490,17 +567,7 @@ fn call_builtin(id: u8, args: &[Value]) -> Result<Value, VmError> {
                     message: "readln expects zero arguments".to_string(),
                 });
             }
-            let mut line = String::new();
-            std::io::stdin().read_line(&mut line).map_err(|e| VmError {
-                message: format!("readln failed: {e}"),
-            })?;
-            if line.ends_with('\n') {
-                line.pop();
-                if line.ends_with('\r') {
-                    line.pop();
-                }
-            }
-            Ok(Value::String(line))
+            host.io_readln().map(Value::String)
         }
         4 => {
             if args.len() != 1 {
@@ -513,9 +580,9 @@ fn call_builtin(id: u8, args: &[Value]) -> Result<Value, VmError> {
                     message: "read expects a string path".to_string(),
                 });
             };
-            match std::fs::read_to_string(path) {
+            match host.fs_read_to_string(path) {
                 Ok(data) => Ok(ok_value(Value::String(data))),
-                Err(e) => Ok(err_value(format!("read failed: {e}"))),
+                Err(e) => Ok(err_value(e)),
             }
         }
         5 => {
@@ -534,9 +601,9 @@ fn call_builtin(id: u8, args: &[Value]) -> Result<Value, VmError> {
                     message: "write expects a string payload".to_string(),
                 });
             };
-            match std::fs::write(path, data) {
+            match host.fs_write_string(path, data) {
                 Ok(()) => Ok(ok_value(Value::Unit)),
-                Err(e) => Ok(err_value(format!("write failed: {e}"))),
+                Err(e) => Ok(err_value(e)),
             }
         }
         6 => {
@@ -596,18 +663,18 @@ fn call_builtin(id: u8, args: &[Value]) -> Result<Value, VmError> {
                     message: "run expects second argument as string array".to_string(),
                 });
             };
-            let mut child = std::process::Command::new(cmd);
+            let mut proc_args = Vec::with_capacity(arg_values.len());
             for arg in arg_values {
                 let Value::String(arg) = arg else {
                     return Err(VmError {
                         message: "run expects second argument as string array".to_string(),
                     });
                 };
-                child.arg(arg);
+                proc_args.push(arg.clone());
             }
-            match child.status() {
-                Ok(status) => Ok(ok_value(Value::Int(i64::from(status.code().unwrap_or(-1))))),
-                Err(e) => Ok(err_value(format!("run failed: {e}"))),
+            match host.proc_run(cmd, &proc_args) {
+                Ok(code) => Ok(ok_value(Value::Int(i64::from(code)))),
+                Err(e) => Ok(err_value(e)),
             }
         }
         9 => {
@@ -621,32 +688,28 @@ fn call_builtin(id: u8, args: &[Value]) -> Result<Value, VmError> {
                     message: "get expects a string url".to_string(),
                 });
             };
-            match ureq::get(url).call() {
-                Ok(mut response) => {
-                    let mut body = String::new();
-                    response
-                        .body_mut()
-                        .as_reader()
-                        .read_to_string(&mut body)
-                        .map_err(|e| VmError {
-                            message: format!("get body read failed: {e}"),
-                        })?;
-                    Ok(ok_value(Value::String(body)))
-                }
-                Err(e) => Ok(err_value(format!("get failed: {e}"))),
+            match host.http_get(url) {
+                Ok(body) => Ok(ok_value(Value::String(body))),
+                Err(e) => Ok(err_value(e)),
             }
         }
         20 => {
             let (a, b) = int2(args, "+")?;
-            Ok(Value::Int(a + b))
+            a.checked_add(b)
+                .map(Value::Int)
+                .ok_or_else(|| arithmetic_error("integer overflow"))
         }
         21 => {
             let (a, b) = int2(args, "-")?;
-            Ok(Value::Int(a - b))
+            a.checked_sub(b)
+                .map(Value::Int)
+                .ok_or_else(|| arithmetic_error("integer overflow"))
         }
         22 => {
             let (a, b) = int2(args, "*")?;
-            Ok(Value::Int(a * b))
+            a.checked_mul(b)
+                .map(Value::Int)
+                .ok_or_else(|| arithmetic_error("integer overflow"))
         }
         23 => {
             let (a, b) = int2(args, "/")?;
@@ -655,7 +718,9 @@ fn call_builtin(id: u8, args: &[Value]) -> Result<Value, VmError> {
                     message: with_code("E4003", "division by zero"),
                 });
             }
-            Ok(Value::Int(a / b))
+            a.checked_div(b)
+                .map(Value::Int)
+                .ok_or_else(|| arithmetic_error("integer overflow"))
         }
         24 => {
             let (a, b) = int2(args, "%")?;
@@ -664,7 +729,9 @@ fn call_builtin(id: u8, args: &[Value]) -> Result<Value, VmError> {
                     message: with_code("E4003", "division by zero"),
                 });
             }
-            Ok(Value::Int(a % b))
+            a.checked_rem(b)
+                .map(Value::Int)
+                .ok_or_else(|| arithmetic_error("integer overflow"))
         }
         25 => {
             if args.len() != 2 {
@@ -730,7 +797,9 @@ fn call_builtin(id: u8, args: &[Value]) -> Result<Value, VmError> {
                     message: "neg expects integer arguments".to_string(),
                 });
             };
-            Ok(Value::Int(-v))
+            v.checked_neg()
+                .map(Value::Int)
+                .ok_or_else(|| arithmetic_error("integer overflow"))
         }
         35 => {
             if args.len() != 2 {
@@ -858,7 +927,9 @@ fn json_to_value(v: serde_json::Value) -> Value {
 
 fn value_to_json(v: &Value) -> Option<serde_json::Value> {
     match v {
-        Value::Adt { tag, fields } if tag == "Null" && fields.is_empty() => Some(serde_json::Value::Null),
+        Value::Adt { tag, fields } if tag == "Null" && fields.is_empty() => {
+            Some(serde_json::Value::Null)
+        }
         Value::Adt { tag, fields } if tag == "Bool" && fields.len() == 1 => match &fields[0] {
             Value::Bool(b) => Some(serde_json::Value::Bool(*b)),
             _ => None,
@@ -938,23 +1009,66 @@ fn with_code(code: &str, message: &str) -> String {
     format!("{code}: {message}")
 }
 
+fn arithmetic_error(message: &str) -> VmError {
+    VmError {
+        message: with_code("E4003", message),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Value, call_builtin, json_to_value, value_to_json};
+    use super::{FuzzHost, Value, VmError, VmHost, call_builtin, json_to_value, value_to_json};
+
+    struct TestHost;
+
+    impl VmHost for TestHost {
+        fn io_print(&mut self, _text: &str) -> Result<(), VmError> {
+            Ok(())
+        }
+        fn io_println(&mut self, _text: &str) -> Result<(), VmError> {
+            Ok(())
+        }
+        fn io_readln(&mut self) -> Result<String, VmError> {
+            Ok(String::new())
+        }
+        fn fs_read_to_string(&mut self, _path: &str) -> Result<String, String> {
+            Err("disabled".to_string())
+        }
+        fn fs_write_string(&mut self, _path: &str, _data: &str) -> Result<(), String> {
+            Err("disabled".to_string())
+        }
+        fn proc_run(&mut self, _cmd: &str, _args: &[String]) -> Result<i32, String> {
+            Ok(0)
+        }
+        fn http_get(&mut self, _url: &str) -> Result<String, String> {
+            Err("disabled".to_string())
+        }
+    }
 
     #[test]
     fn proc_run_builtin_rejects_non_array_args() {
-        let err = call_builtin(8, &[Value::String("echo".to_string()), Value::String("x".to_string())])
-            .expect_err("run should reject non-array second argument");
+        let mut host = FuzzHost;
+        let err = call_builtin(
+            &mut host,
+            8,
+            &[
+                Value::String("echo".to_string()),
+                Value::String("x".to_string()),
+            ],
+        )
+        .expect_err("run should reject non-array second argument");
         assert!(
-            err.to_string().contains("run expects second argument as string array"),
+            err.to_string()
+                .contains("run expects second argument as string array"),
             "unexpected error: {err}"
         );
     }
 
     #[test]
     fn proc_run_builtin_accepts_string_array_args() {
+        let mut host = TestHost;
         let value = call_builtin(
+            &mut host,
             8,
             &[
                 Value::String("echo".to_string()),

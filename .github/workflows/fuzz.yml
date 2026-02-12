@@ -1,0 +1,23 @@
+name: fuzz
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fuzz-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: install cargo-fuzz
+        run: cargo install cargo-fuzz
+      - name: fuzz lexer
+        run: cargo +nightly fuzz run fuzz_lexer -- -max_total_time=30
+      - name: fuzz parser
+        run: cargo +nightly fuzz run fuzz_parser -- -max_total_time=30
+      - name: fuzz fmt roundtrip
+        run: cargo +nightly fuzz run fuzz_fmt_roundtrip -- -max_total_time=30
+      - name: fuzz bytecode decode
+        run: cargo +nightly fuzz run fuzz_bytecode_decode -- -max_total_time=30
+      - name: fuzz vm step
+        run: cargo +nightly fuzz run fuzz_vm_step -- -max_total_time=30

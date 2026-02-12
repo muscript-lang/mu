@@ -1,0 +1,1 @@
+@sem.eval{F emit:(s,i32)->i32!{io}={c(println,arg0);arg1};F always_true:(s)->b!{io}={c(println,arg0);t};F main:()->i32!{io}={c(+,c(emit,"arg-1",1),c(emit,"arg-2",2));v(x:i32=c(emit,"let-value",3),c(emit,"let-body",x));i(c(always_true,"if-cond"),c(emit,"if-then",0),c(emit,"if-else",1));m(c(always_true,"match-scrut")){t=>c(emit,"match-arm-t",0);_=>c(emit,"match-arm-_",1);};0};}
