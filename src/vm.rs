@@ -184,6 +184,41 @@ pub fn run_bytecode(bytecode: &[u8], _args: &[String]) -> Result<(), VmError> {
                     ip = target;
                 }
             }
+            x if x == OpCode::AssertConst as u8 => {
+                let msg_idx = read_u32(code, &mut ip)? as usize;
+                let msg = strings.get(msg_idx).ok_or_else(|| VmError {
+                    message: "assert message index out of bounds".to_string(),
+                })?;
+                let cond = stack.pop().ok_or_else(|| VmError {
+                    message: "stack underflow in ASSERT_CONST".to_string(),
+                })?;
+                let is_true = as_bool(cond)?;
+                if !is_true {
+                    return Err(VmError {
+                        message: format!("assert failure: {msg}"),
+                    });
+                }
+                stack.push(Value::Unit);
+            }
+            x if x == OpCode::AssertDyn as u8 => {
+                let msg = stack.pop().ok_or_else(|| VmError {
+                    message: "stack underflow in ASSERT_DYN".to_string(),
+                })?;
+                let cond = stack.pop().ok_or_else(|| VmError {
+                    message: "stack underflow in ASSERT_DYN".to_string(),
+                })?;
+                let is_true = as_bool(cond)?;
+                if !is_true {
+                    let message = match msg {
+                        Value::String(s) => s,
+                        _ => "assert failure".to_string(),
+                    };
+                    return Err(VmError {
+                        message: format!("assert failure: {message}"),
+                    });
+                }
+                stack.push(Value::Unit);
+            }
             x if x == OpCode::Return as u8 => {
                 let ret = stack.pop().ok_or_else(|| VmError {
                     message: "stack underflow in RET".to_string(),
@@ -214,6 +249,15 @@ pub fn run_bytecode(bytecode: &[u8], _args: &[String]) -> Result<(), VmError> {
     Err(VmError {
         message: "program terminated without RET".to_string(),
     })
+}
+
+fn as_bool(value: Value) -> Result<bool, VmError> {
+    match value {
+        Value::Bool(v) => Ok(v),
+        _ => Err(VmError {
+            message: "assert expects bool condition".to_string(),
+        }),
+    }
 }
 
 fn call_builtin(id: u8, args: &[Value]) -> Result<Value, VmError> {

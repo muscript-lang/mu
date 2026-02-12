@@ -57,3 +57,28 @@ fn bytecode_runs_json_parse_and_stringify_calls() {
     let bc = compile(&program).expect("program should lower to bytecode");
     run_bytecode(&bc, &[]).expect("bytecode should run");
 }
+
+#[test]
+fn bytecode_runs_assert_true() {
+    let src = "@x.aok{F main:()->i32={a(t,\"ok\");0};}";
+    let program = parse_str(src).expect("program should parse");
+    let bc = compile(&program).expect("program should lower to bytecode");
+    run_bytecode(&bc, &[]).expect("assert true should run");
+}
+
+#[test]
+fn bytecode_traps_on_assert_false() {
+    let src = "@x.abad{F main:()->i32={a(f,\"boom\");0};}";
+    let program = parse_str(src).expect("program should parse");
+    let bc = compile(&program).expect("program should lower to bytecode");
+    let err = run_bytecode(&bc, &[]).expect_err("assert false should trap");
+    assert!(err.to_string().contains("assert failure"));
+}
+
+#[test]
+fn bytecode_runs_require_and_ensure_true() {
+    let src = "@x.req{F main:()->i32={^t;_ t;0};}";
+    let program = parse_str(src).expect("program should parse");
+    let bc = compile(&program).expect("program should lower to bytecode");
+    run_bytecode(&bc, &[]).expect("contracts should run");
+}

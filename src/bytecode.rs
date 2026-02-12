@@ -34,6 +34,8 @@ pub enum OpCode {
     Return = 11,
     MkAdt = 12,
     JumpIfTag = 13,
+    AssertConst = 14,
+    AssertDyn = 15,
 }
 
 #[derive(Default)]
@@ -222,6 +224,29 @@ impl Lowerer {
                 }
             }
             Expr::Paren { inner, .. } => self.lower_expr(inner)?,
+            Expr::Assert { cond, msg, .. } => {
+                self.lower_expr(cond)?;
+                if let Some(msg_expr) = msg {
+                    self.lower_expr(msg_expr)?;
+                    self.code.push(OpCode::AssertDyn as u8);
+                } else {
+                    let msg_id = self.intern_string("assert failure");
+                    self.code.push(OpCode::AssertConst as u8);
+                    self.code.extend_from_slice(&msg_id.to_le_bytes());
+                }
+            }
+            Expr::Require { expr, .. } => {
+                self.lower_expr(expr)?;
+                let msg_id = self.intern_string("contract require failure");
+                self.code.push(OpCode::AssertConst as u8);
+                self.code.extend_from_slice(&msg_id.to_le_bytes());
+            }
+            Expr::Ensure { expr, .. } => {
+                self.lower_expr(expr)?;
+                let msg_id = self.intern_string("contract ensure failure");
+                self.code.push(OpCode::AssertConst as u8);
+                self.code.extend_from_slice(&msg_id.to_le_bytes());
+            }
             Expr::NameApp { name, args, .. } => {
                 if !self.ctor_names.contains(&name.name) {
                     return Err(BytecodeError {
@@ -239,10 +264,7 @@ impl Lowerer {
                 self.code.extend_from_slice(&tag_id.to_le_bytes());
                 self.code.push(args.len() as u8);
             }
-            Expr::Assert { .. }
-            | Expr::Require { .. }
-            | Expr::Ensure { .. }
-            | Expr::Lambda { .. }
+            Expr::Lambda { .. }
              => {
                 return Err(BytecodeError {
                     message: "expression form not supported by bytecode lowering yet".to_string(),
