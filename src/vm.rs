@@ -14,6 +14,7 @@ struct FunctionBlob {
 #[derive(Debug, Clone, PartialEq)]
 enum Value {
     Int(i64),
+    Float(f64),
     Bool(bool),
     String(String),
     Array(Vec<Value>),
@@ -572,6 +573,7 @@ fn call_builtin(id: u8, args: &[Value]) -> Result<Value, VmError> {
                 Value::Adt { tag, fields } => Ok(Value::String(format!("{tag}({})", fields.len()))),
                 Value::Closure { .. } => Ok(Value::String("<closure>".to_string())),
                 Value::Int(v) => Ok(Value::String(v.to_string())),
+                Value::Float(v) => Ok(Value::String(v.to_string())),
                 Value::Bool(v) => Ok(Value::String(v.to_string())),
                 Value::Array(items) => Ok(Value::String(format!("<array:{}>", items.len()))),
                 Value::Map(entries) => Ok(Value::String(format!("<map:{}>", entries.len()))),
@@ -831,7 +833,7 @@ fn json_to_value(v: serde_json::Value) -> Value {
         },
         serde_json::Value::Number(n) => Value::Adt {
             tag: "Num".to_string(),
-            fields: vec![Value::String(n.to_string())],
+            fields: vec![Value::Float(n.as_f64().unwrap_or(0.0))],
         },
         serde_json::Value::String(s) => Value::Adt {
             tag: "Str".to_string(),
@@ -862,6 +864,7 @@ fn value_to_json(v: &Value) -> Option<serde_json::Value> {
             _ => None,
         },
         Value::Adt { tag, fields } if tag == "Num" && fields.len() == 1 => match &fields[0] {
+            Value::Float(v) => serde_json::Number::from_f64(*v).map(serde_json::Value::Number),
             Value::String(s) => serde_json::from_str::<serde_json::Number>(s)
                 .ok()
                 .map(serde_json::Value::Number),
@@ -937,7 +940,7 @@ fn with_code(code: &str, message: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Value, call_builtin};
+    use super::{Value, call_builtin, json_to_value, value_to_json};
 
     #[test]
     fn proc_run_builtin_rejects_non_array_args() {
@@ -960,5 +963,25 @@ mod tests {
         )
         .expect("run should accept string array");
         assert!(matches!(value, Value::Adt { tag, .. } if tag == "Ok"));
+    }
+
+    #[test]
+    fn json_num_payload_uses_float_value() {
+        let value = json_to_value(serde_json::json!(1.25));
+        let Value::Adt { tag, fields } = value else {
+            panic!("expected ADT value");
+        };
+        assert_eq!(tag, "Num");
+        assert!(matches!(fields.as_slice(), [Value::Float(v)] if (*v - 1.25).abs() < f64::EPSILON));
+    }
+
+    #[test]
+    fn json_num_float_roundtrips_to_json_number() {
+        let value = Value::Adt {
+            tag: "Num".to_string(),
+            fields: vec![Value::Float(2.5)],
+        };
+        let json = value_to_json(&value).expect("Num(Float) should convert to JSON");
+        assert_eq!(json, serde_json::json!(2.5));
     }
 }

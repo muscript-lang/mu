@@ -113,7 +113,7 @@ fn run_command_executes_json_example() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("{\"mu\":1}"),
+        stdout.contains("{\"mu\":1}") || stdout.contains("{\"mu\":1.0}"),
         "json example should print stringify(parse(...)) output, got: {stdout}"
     );
 }
@@ -206,7 +206,7 @@ fn run_command_executes_built_json_mub() {
     assert!(run.status.success(), "run on json .mub should succeed");
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert!(
-        stdout.contains("{\"mu\":1}"),
+        stdout.contains("{\"mu\":1}") || stdout.contains("{\"mu\":1.0}"),
         "json .mub run should print roundtrip output, got: {stdout}"
     );
 
