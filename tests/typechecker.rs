@@ -278,6 +278,13 @@ fn result_er_ctor_expression_conforms_to_declared_result_type() {
 }
 
 #[test]
+fn result_match_can_passthrough_ok_and_er_payloads() {
+    let src = "@m.respass{F fetch:(s)->s!s!{net}=m(c(get,arg0)){Ok(body)=>Ok(body);Er(msg)=>Er(msg);};F main:()->i32=0;}";
+    let program = parse_str(src).expect("program should parse");
+    check_program(&program).expect("result match passthrough should typecheck");
+}
+
+#[test]
 fn duplicate_export_name_is_rejected() {
     let src = "@m.ex{E[x,x];V x:i32=0;F main:()->i32=0;}";
     let program = parse_str(src).expect("program should parse");
