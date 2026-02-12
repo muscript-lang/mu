@@ -1,6 +1,11 @@
-# muScript v0.1 (Rust scaffold)
+# muScript v0.1
 
-This repository contains an initial Rust scaffold for `muc`, following the project constraints in `AGENTS.md` and the language definitions in `SPEC.md` and `EBNF.md`.
+`muc` is the reference µScript v0.1 toolchain in Rust.
+It includes:
+- Lexer + parser for the EBNF grammar
+- Canonical formatter (`mufmt` behavior via `muc fmt`)
+- Module loading + name resolution + type/effect checking
+- Stack bytecode (`.mub`, header `MUB1`) + VM runtime
 
 ## Quickstart
 
@@ -10,25 +15,31 @@ This repository contains an initial Rust scaffold for `muc`, following the proje
 cargo build
 ```
 
-2. Run formatter in check mode (canonical formatting gate):
+2. Canonical format gate:
 
 ```bash
 cargo run -- fmt --check .
 ```
 
-3. Format files:
-
-```bash
-cargo run -- fmt .
-```
-
-4. Parse + typecheck stubs:
+3. Type + effect check:
 
 ```bash
 cargo run -- check examples
 ```
 
-5. Run tests:
+4. Run script:
+
+```bash
+cargo run -- run examples/hello.mu
+```
+
+5. Build bytecode:
+
+```bash
+cargo run -- build examples/hello.mu -o hello.mub
+```
+
+6. Run tests:
 
 ```bash
 cargo test
@@ -38,10 +49,5 @@ cargo test
 
 - `muc fmt <file|dir> [--check]`
 - `muc check <file|dir>`
-- `muc run <file.mu> [-- args...]`
+- `muc run <file.mu> [-- args...]` (compiles to bytecode and executes)
 - `muc build <file.mu> -o out.mub`
-
-Current status:
-
-- Lexer/parser/AST/formatter are scaffolded with deterministic output.
-- Typechecking, bytecode, VM, and stdlib are intentionally minimal stubs to keep boundaries in place for incremental implementation.

@@ -1,6 +1,6 @@
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::bytecode;
 use crate::fmt::{collect_mu_files, parse_and_format};
@@ -81,7 +81,7 @@ fn parse_build(args: &[String]) -> Result<(PathBuf, PathBuf), String> {
     Ok((PathBuf::from(&args[0]), PathBuf::from(&args[2])))
 }
 
-fn cmd_fmt(path: &PathBuf, check: bool) -> Result<(), String> {
+fn cmd_fmt(path: &Path, check: bool) -> Result<(), String> {
     let files = collect_mu_files(path)?;
     if files.is_empty() {
         return Err(format!("no .mu files found under {}", path.display()));
@@ -115,7 +115,7 @@ fn cmd_fmt(path: &PathBuf, check: bool) -> Result<(), String> {
     Ok(())
 }
 
-fn cmd_check(path: &PathBuf) -> Result<(), String> {
+fn cmd_check(path: &Path) -> Result<(), String> {
     let files = collect_mu_files(path)?;
     if files.is_empty() {
         return Err(format!("no .mu files found under {}", path.display()));
@@ -139,7 +139,7 @@ fn cmd_run(file: &PathBuf, args: &[String]) -> Result<(), String> {
         fs::read_to_string(file).map_err(|e| format!("failed reading {}: {e}", file.display()))?;
     let program = parse_str(&src).map_err(|e| format!("{}: {}", file.display(), e))?;
     check_program(&program).map_err(|e| format!("{}: {}", file.display(), e))?;
-    let bytecode = bytecode::compile(&program);
+    let bytecode = bytecode::compile(&program).map_err(|e| format!("{}: {}", file.display(), e))?;
     run_bytecode(&bytecode, args).map_err(|e| e.to_string())
 }
 
@@ -148,7 +148,7 @@ fn cmd_build(file: &PathBuf, output: &PathBuf) -> Result<(), String> {
         fs::read_to_string(file).map_err(|e| format!("failed reading {}: {e}", file.display()))?;
     let program = parse_str(&src).map_err(|e| format!("{}: {}", file.display(), e))?;
     check_program(&program).map_err(|e| format!("{}: {}", file.display(), e))?;
-    let bytecode = bytecode::compile(&program);
+    let bytecode = bytecode::compile(&program).map_err(|e| format!("{}: {}", file.display(), e))?;
     fs::write(output, bytecode).map_err(|e| format!("failed writing {}: {e}", output.display()))?;
     println!("built {}", output.display());
     Ok(())

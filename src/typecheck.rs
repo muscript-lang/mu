@@ -217,7 +217,7 @@ fn build_module_sigs(programs: &[Program]) -> Result<BTreeMap<String, ModuleSigs
     for program in programs {
         let module_name = modid_to_string(&program.module.mod_id.parts);
         let sigs = modules.get(&module_name).expect("module must exist");
-        for (_, target) in &sigs.imports {
+        for target in sigs.imports.values() {
             if !modules.contains_key(target) {
                 return Err(TypeError {
                     code: TypeErrorCode::UnknownModule,

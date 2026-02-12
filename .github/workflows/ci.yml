@@ -12,6 +12,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: cargo fmt
         run: cargo fmt --all -- --check
+      - name: cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
       - name: cargo test
         run: cargo test --all-targets
       - name: muc fmt check

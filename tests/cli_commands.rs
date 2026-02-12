@@ -62,25 +62,22 @@ fn build_outputs_mub_magic() {
     );
 
     let bytes = fs::read(&out).expect("build output should be readable");
-    assert_eq!(&bytes, b"MUB0");
+    assert!(bytes.starts_with(b"MUB1"), "bytecode should start with MUB1");
     let _ = fs::remove_file(out);
 }
 
 #[test]
-fn run_command_is_wired_even_though_runtime_is_stubbed() {
+fn run_command_executes_program() {
     let exe = env!("CARGO_BIN_EXE_muc");
     let output = Command::new(exe)
         .args(["run", "examples/hello.mu"])
         .output()
         .expect("binary should run");
 
-    assert!(
-        !output.status.success(),
-        "run should currently fail until VM is implemented"
-    );
+    assert!(output.status.success(), "run should succeed with VM implemented");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("runtime is not implemented"),
-        "run should surface runtime stub message, got: {stderr}"
+        stderr.is_empty(),
+        "run should not emit errors, got: {stderr}"
     );
 }
