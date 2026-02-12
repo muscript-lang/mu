@@ -36,3 +36,17 @@ fn parse_rejects_empty_type_param_list_in_function_decl() {
     assert_eq!(err.code, ParseErrorCode::ExpectedIdent);
     assert_eq!(err.code.as_str(), "E2003");
 }
+
+#[test]
+fn parse_rejects_symref_without_symtab() {
+    let err = parse_str("@m{F #0:()->i32=0;}").expect_err("symref without symtab should fail");
+    assert_eq!(err.code, ParseErrorCode::MissingSymbolTable);
+    assert_eq!(err.code.as_str(), "E2006");
+}
+
+#[test]
+fn parse_rejects_out_of_range_symref() {
+    let err = parse_str("@m{$[x];F #1:()->i32=0;}").expect_err("out of range symref should fail");
+    assert_eq!(err.code, ParseErrorCode::SymbolRefOutOfRange);
+    assert_eq!(err.code.as_str(), "E2007");
+}

@@ -311,3 +311,10 @@ fn duplicate_import_alias_is_rejected() {
     let err = check_programs(&[p0, p1, p2]).expect_err("duplicate import alias should fail");
     assert_eq!(err.code, TypeErrorCode::DuplicateSymbol);
 }
+
+#[test]
+fn mixed_ident_and_symref_typechecks() {
+    let src = "@m.mix{$[main,x,Yes];T Opt=No|#2(i32);F #0:()->i32=[m #2(1) {#2(#1) #1} {No 0}];}";
+    let program = parse_str(src).expect("program should parse");
+    check_program(&program).expect("mixed identifiers and symrefs should typecheck");
+}

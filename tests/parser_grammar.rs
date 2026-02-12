@@ -69,3 +69,21 @@ fn allows_identifiers_named_like_core_forms() {
         "formatted output should preserve identifier call through explicit c(...): {formatted}"
     );
 }
+
+#[test]
+fn parses_compressed_forms_and_symrefs() {
+    let src =
+        "@m.c{$[io,main,print,x];:#0=core.io;F #1:()->i32!{I}=[v #3 1 [i t {(#2 \"ok\");#3} 0]];}";
+    let program = parse_str(src).expect("compressed source should parse");
+    let formatted = format_program(&program);
+    assert!(formatted.starts_with("@m.c{"));
+}
+
+#[test]
+fn parses_mixed_readable_and_compressed_syntax() {
+    let src =
+        "@m.mix{$[main,x,Yes];T Opt=No|#2(i32);F #0:()->i32=[m #2(1) {#2(#1) v(#1=1,#1)} {No 0}];}";
+    let program = parse_str(src).expect("mixed source should parse");
+    let formatted = format_program(&program);
+    assert!(formatted.contains("F main:()->i32="));
+}

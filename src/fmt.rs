@@ -1,34 +1,308 @@
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::ast::{
-    Decl, EffectAtom, EffectSet, Expr, FunctionType, Literal, Pattern, PrimType, Program, TypeExpr,
+    Decl, EffectAtom, EffectSet, Expr, FunctionType, Ident, Literal, MatchArm, Module, Name, Param,
+    Pattern, PrimType, Program, TypeExpr,
 };
 use crate::parser::{ParseError, parse_str};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FmtMode {
+    Readable,
+    Compressed,
+}
+
 pub fn parse_and_format(src: &str) -> Result<String, ParseError> {
+    parse_and_format_mode(src, FmtMode::Readable)
+}
+
+pub fn parse_and_format_mode(src: &str, mode: FmtMode) -> Result<String, ParseError> {
     let program = parse_str(src)?;
-    Ok(format_program(&program))
+    Ok(format_program_mode(&program, mode))
 }
 
 pub fn format_program(program: &Program) -> String {
+    format_program_mode(program, FmtMode::Readable)
+}
+
+pub fn format_program_mode(program: &Program, mode: FmtMode) -> String {
     let mut out = String::new();
     out.push('@');
     out.push_str(&program.module.mod_id.parts.join("."));
     out.push('{');
+
+    let compressed_table = match mode {
+        FmtMode::Readable => None,
+        FmtMode::Compressed => Some(build_compressed_symtab(&program.module)),
+    };
+
+    if let Some(table) = compressed_table.as_ref() {
+        out.push('$');
+        out.push('[');
+        for (i, name) in table.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            out.push_str(name);
+        }
+        out.push(']');
+        out.push(';');
+    }
+
     for decl in &program.module.decls {
-        format_decl(decl, &mut out);
+        format_decl(
+            decl,
+            &program.module,
+            compressed_table.as_ref(),
+            mode,
+            &mut out,
+        );
     }
     out.push('}');
     out.push('\n');
     out
 }
 
-fn format_decl(decl: &Decl, out: &mut String) {
+fn build_compressed_symtab(module: &Module) -> Vec<String> {
+    let mut names = BTreeSet::new();
+    for decl in &module.decls {
+        collect_decl_names(decl, module, &mut names);
+    }
+    names.into_iter().collect()
+}
+
+fn collect_decl_names(decl: &Decl, module: &Module, out: &mut BTreeSet<String>) {
+    match decl {
+        Decl::Import(d) => {
+            collect_ident(&d.alias, module, out);
+        }
+        Decl::Export(d) => {
+            for name in &d.names {
+                collect_ident(name, module, out);
+            }
+        }
+        Decl::Type(d) => {
+            collect_ident(&d.name, module, out);
+            for p in &d.params {
+                collect_ident(p, module, out);
+            }
+            for ctor in &d.ctors {
+                collect_ident(&ctor.name, module, out);
+                for field in &ctor.fields {
+                    collect_type_names(field, module, out);
+                }
+            }
+        }
+        Decl::Value(d) => {
+            collect_ident(&d.name, module, out);
+            collect_type_names(&d.ty, module, out);
+            collect_expr_names(&d.expr, module, out);
+        }
+        Decl::Function(d) => {
+            collect_ident(&d.name, module, out);
+            for tp in &d.type_params {
+                collect_ident(tp, module, out);
+            }
+            collect_function_type_names(&d.sig, module, out);
+            collect_expr_names(&d.expr, module, out);
+        }
+    }
+}
+
+fn collect_function_type_names(sig: &FunctionType, module: &Module, out: &mut BTreeSet<String>) {
+    for p in &sig.params {
+        collect_type_names(p, module, out);
+    }
+    collect_type_names(&sig.ret, module, out);
+}
+
+fn collect_type_names(ty: &TypeExpr, module: &Module, out: &mut BTreeSet<String>) {
+    match ty {
+        TypeExpr::Prim(_, _) => {}
+        TypeExpr::Named { name, args, .. } => {
+            collect_ident(name, module, out);
+            for arg in args {
+                collect_type_names(arg, module, out);
+            }
+        }
+        TypeExpr::Optional { inner, .. }
+        | TypeExpr::Array { inner, .. }
+        | TypeExpr::Group { inner, .. } => {
+            collect_type_names(inner, module, out);
+        }
+        TypeExpr::Map { key, value, .. } => {
+            collect_type_names(key, module, out);
+            collect_type_names(value, module, out);
+        }
+        TypeExpr::Tuple { items, .. } => {
+            for item in items {
+                collect_type_names(item, module, out);
+            }
+        }
+        TypeExpr::Function { sig, .. } => collect_function_type_names(sig, module, out),
+        TypeExpr::ResultSugar { ok, err, .. } => {
+            collect_type_names(ok, module, out);
+            collect_type_names(err, module, out);
+        }
+    }
+}
+
+fn collect_expr_names(expr: &Expr, module: &Module, out: &mut BTreeSet<String>) {
+    match expr {
+        Expr::Block { prefix, tail, .. } => {
+            for e in prefix {
+                collect_expr_names(e, module, out);
+            }
+            collect_expr_names(tail, module, out);
+        }
+        Expr::Unit(_) | Expr::Literal(_) => {}
+        Expr::Let {
+            name,
+            ty,
+            value,
+            body,
+            ..
+        } => {
+            collect_ident(name, module, out);
+            if let Some(ty) = ty {
+                collect_type_names(ty, module, out);
+            }
+            collect_expr_names(value, module, out);
+            collect_expr_names(body, module, out);
+        }
+        Expr::If {
+            cond,
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            collect_expr_names(cond, module, out);
+            collect_expr_names(then_branch, module, out);
+            collect_expr_names(else_branch, module, out);
+        }
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
+            collect_expr_names(scrutinee, module, out);
+            for arm in arms {
+                collect_pattern_names(&arm.pattern, module, out);
+                collect_expr_names(&arm.expr, module, out);
+            }
+        }
+        Expr::Call { callee, args, .. } => {
+            collect_expr_names(callee, module, out);
+            for arg in args {
+                collect_expr_names(arg, module, out);
+            }
+        }
+        Expr::Lambda {
+            params, ret, body, ..
+        } => {
+            for p in params {
+                collect_ident(&p.name, module, out);
+                collect_type_names(&p.ty, module, out);
+            }
+            collect_type_names(ret, module, out);
+            collect_expr_names(body, module, out);
+        }
+        Expr::Assert { cond, msg, .. } => {
+            collect_expr_names(cond, module, out);
+            if let Some(msg) = msg {
+                collect_expr_names(msg, module, out);
+            }
+        }
+        Expr::Require { expr, .. }
+        | Expr::Ensure { expr, .. }
+        | Expr::Paren { inner: expr, .. } => {
+            collect_expr_names(expr, module, out);
+        }
+        Expr::Name(name) => collect_ident(name, module, out),
+        Expr::NameApp { name, args, .. } => {
+            collect_ident(name, module, out);
+            for arg in args {
+                collect_expr_names(arg, module, out);
+            }
+        }
+    }
+}
+
+fn collect_pattern_names(pat: &Pattern, module: &Module, out: &mut BTreeSet<String>) {
+    match pat {
+        Pattern::Wildcard(_) | Pattern::Literal(_) => {}
+        Pattern::Name(id) => collect_ident(id, module, out),
+        Pattern::Ctor { name, args, .. } => {
+            collect_ident(name, module, out);
+            for arg in args {
+                collect_pattern_names(arg, module, out);
+            }
+        }
+        Pattern::Tuple { items, .. } => {
+            for item in items {
+                collect_pattern_names(item, module, out);
+            }
+        }
+        Pattern::Paren { inner, .. } => collect_pattern_names(inner, module, out),
+    }
+}
+
+fn collect_ident(id: &Ident, module: &Module, out: &mut BTreeSet<String>) {
+    if let Some(name) = resolve_ident(module, id) {
+        out.insert(name);
+    }
+}
+
+fn resolve_ident(module: &Module, id: &Ident) -> Option<String> {
+    match &id.name {
+        Name::Ident(name) => Some(name.clone()),
+        Name::Sym(idx) => module
+            .symtab
+            .as_ref()
+            .and_then(|s| s.get(*idx as usize))
+            .cloned(),
+    }
+}
+
+fn render_name(
+    module: &Module,
+    id: &Ident,
+    compressed_table: Option<&Vec<String>>,
+    mode: FmtMode,
+) -> String {
+    match mode {
+        FmtMode::Readable => resolve_ident(module, id).unwrap_or_else(|| id.display()),
+        FmtMode::Compressed => {
+            let Some(table) = compressed_table else {
+                return resolve_ident(module, id).unwrap_or_else(|| id.display());
+            };
+            let Some(name) = resolve_ident(module, id) else {
+                return id.display();
+            };
+            let mut index_by_name = HashMap::new();
+            for (i, sym) in table.iter().enumerate() {
+                index_by_name.insert(sym.as_str(), i);
+            }
+            if let Some(idx) = index_by_name.get(name.as_str()) {
+                format!("#{idx}")
+            } else {
+                name
+            }
+        }
+    }
+}
+
+fn format_decl(
+    decl: &Decl,
+    module: &Module,
+    compressed_table: Option<&Vec<String>>,
+    mode: FmtMode,
+    out: &mut String,
+) {
     match decl {
         Decl::Import(d) => {
             out.push(':');
-            out.push_str(&d.alias.name);
+            out.push_str(&render_name(module, &d.alias, compressed_table, mode));
             out.push('=');
             out.push_str(&d.module.parts.join("."));
             out.push(';');
@@ -40,21 +314,21 @@ fn format_decl(decl: &Decl, out: &mut String) {
                 if i > 0 {
                     out.push(',');
                 }
-                out.push_str(&name.name);
+                out.push_str(&render_name(module, name, compressed_table, mode));
             }
             out.push(']');
             out.push(';');
         }
         Decl::Type(d) => {
             out.push_str("T ");
-            out.push_str(&d.name.name);
+            out.push_str(&render_name(module, &d.name, compressed_table, mode));
             if !d.params.is_empty() {
                 out.push('[');
                 for (i, p) in d.params.iter().enumerate() {
                     if i > 0 {
                         out.push(',');
                     }
-                    out.push_str(&p.name);
+                    out.push_str(&render_name(module, p, compressed_table, mode));
                 }
                 out.push(']');
             }
@@ -63,14 +337,14 @@ fn format_decl(decl: &Decl, out: &mut String) {
                 if i > 0 {
                     out.push('|');
                 }
-                out.push_str(&ctor.name.name);
+                out.push_str(&render_name(module, &ctor.name, compressed_table, mode));
                 if !ctor.fields.is_empty() {
                     out.push('(');
                     for (j, ty) in ctor.fields.iter().enumerate() {
                         if j > 0 {
                             out.push(',');
                         }
-                        format_type(ty, out);
+                        format_type(ty, module, compressed_table, mode, out);
                     }
                     out.push(')');
                 }
@@ -79,36 +353,36 @@ fn format_decl(decl: &Decl, out: &mut String) {
         }
         Decl::Value(d) => {
             out.push_str("V ");
-            out.push_str(&d.name.name);
+            out.push_str(&render_name(module, &d.name, compressed_table, mode));
             out.push(':');
-            format_type(&d.ty, out);
+            format_type(&d.ty, module, compressed_table, mode, out);
             out.push('=');
-            format_expr(&d.expr, out);
+            format_expr(&d.expr, module, compressed_table, mode, out);
             out.push(';');
         }
         Decl::Function(d) => {
             out.push_str("F ");
-            out.push_str(&d.name.name);
+            out.push_str(&render_name(module, &d.name, compressed_table, mode));
             if !d.type_params.is_empty() {
                 out.push('[');
                 for (i, tp) in d.type_params.iter().enumerate() {
                     if i > 0 {
                         out.push(',');
                     }
-                    out.push_str(&tp.name);
+                    out.push_str(&render_name(module, tp, compressed_table, mode));
                 }
                 out.push(']');
             }
             out.push(':');
-            format_function_type(&d.sig, out);
+            format_function_type(&d.sig, module, compressed_table, mode, out);
             out.push('=');
-            format_expr(&d.expr, out);
+            format_expr(&d.expr, module, compressed_table, mode, out);
             out.push(';');
         }
     }
 }
 
-fn format_effect_set(effects: &EffectSet, out: &mut String) {
+fn format_effect_set(effects: &EffectSet, mode: FmtMode, out: &mut String) {
     let atoms = canonical_effect_atoms(effects);
     if atoms.is_empty() {
         return;
@@ -118,14 +392,21 @@ fn format_effect_set(effects: &EffectSet, out: &mut String) {
         if i > 0 {
             out.push(',');
         }
-        out.push_str(match atom {
-            EffectAtom::Io => "io",
-            EffectAtom::Fs => "fs",
-            EffectAtom::Net => "net",
-            EffectAtom::Proc => "proc",
-            EffectAtom::Rand => "rand",
-            EffectAtom::Time => "time",
-            EffectAtom::St => "st",
+        out.push_str(match (mode, atom) {
+            (FmtMode::Readable, EffectAtom::Io) => "io",
+            (FmtMode::Readable, EffectAtom::Fs) => "fs",
+            (FmtMode::Readable, EffectAtom::Net) => "net",
+            (FmtMode::Readable, EffectAtom::Proc) => "proc",
+            (FmtMode::Readable, EffectAtom::Rand) => "rand",
+            (FmtMode::Readable, EffectAtom::Time) => "time",
+            (FmtMode::Readable, EffectAtom::St) => "st",
+            (FmtMode::Compressed, EffectAtom::Io) => "I",
+            (FmtMode::Compressed, EffectAtom::Fs) => "F",
+            (FmtMode::Compressed, EffectAtom::Net) => "N",
+            (FmtMode::Compressed, EffectAtom::Proc) => "P",
+            (FmtMode::Compressed, EffectAtom::Rand) => "R",
+            (FmtMode::Compressed, EffectAtom::Time) => "T",
+            (FmtMode::Compressed, EffectAtom::St) => "S",
         });
     }
     out.push('}');
@@ -149,21 +430,33 @@ fn canonical_effect_atoms(effects: &EffectSet) -> Vec<EffectAtom> {
     out
 }
 
-fn format_function_type(sig: &FunctionType, out: &mut String) {
+fn format_function_type(
+    sig: &FunctionType,
+    module: &Module,
+    compressed_table: Option<&Vec<String>>,
+    mode: FmtMode,
+    out: &mut String,
+) {
     out.push('(');
     for (i, ty) in sig.params.iter().enumerate() {
         if i > 0 {
             out.push(',');
         }
-        format_type(ty, out);
+        format_type(ty, module, compressed_table, mode, out);
     }
     out.push(')');
     out.push_str("->");
-    format_type(&sig.ret, out);
-    format_effect_set(&sig.effects, out);
+    format_type(&sig.ret, module, compressed_table, mode, out);
+    format_effect_set(&sig.effects, mode, out);
 }
 
-fn format_type(ty: &TypeExpr, out: &mut String) {
+fn format_type(
+    ty: &TypeExpr,
+    module: &Module,
+    compressed_table: Option<&Vec<String>>,
+    mode: FmtMode,
+    out: &mut String,
+) {
     match ty {
         TypeExpr::Prim(prim, _) => out.push_str(match prim {
             PrimType::Bool => "b",
@@ -177,31 +470,31 @@ fn format_type(ty: &TypeExpr, out: &mut String) {
             PrimType::Unit => "unit",
         }),
         TypeExpr::Named { name, args, .. } => {
-            out.push_str(&name.name);
+            out.push_str(&render_name(module, name, compressed_table, mode));
             if !args.is_empty() {
                 out.push('[');
                 for (i, arg) in args.iter().enumerate() {
                     if i > 0 {
                         out.push(',');
                     }
-                    format_type(arg, out);
+                    format_type(arg, module, compressed_table, mode, out);
                 }
                 out.push(']');
             }
         }
         TypeExpr::Optional { inner, .. } => {
             out.push('?');
-            format_type(inner, out);
+            format_type(inner, module, compressed_table, mode, out);
         }
         TypeExpr::Array { inner, .. } => {
-            format_type(inner, out);
+            format_type(inner, module, compressed_table, mode, out);
             out.push_str("[]");
         }
         TypeExpr::Map { key, value, .. } => {
             out.push('{');
-            format_type(key, out);
+            format_type(key, module, compressed_table, mode, out);
             out.push(':');
-            format_type(value, out);
+            format_type(value, module, compressed_table, mode, out);
             out.push('}');
         }
         TypeExpr::Tuple { items, .. } => {
@@ -210,19 +503,21 @@ fn format_type(ty: &TypeExpr, out: &mut String) {
                 if i > 0 {
                     out.push(',');
                 }
-                format_type(item, out);
+                format_type(item, module, compressed_table, mode, out);
             }
             out.push(')');
         }
-        TypeExpr::Function { sig, .. } => format_function_type(sig, out),
+        TypeExpr::Function { sig, .. } => {
+            format_function_type(sig, module, compressed_table, mode, out)
+        }
         TypeExpr::ResultSugar { ok, err, .. } => {
-            format_type(ok, out);
+            format_type(ok, module, compressed_table, mode, out);
             out.push('!');
-            format_type(err, out);
+            format_type(err, module, compressed_table, mode, out);
         }
         TypeExpr::Group { inner, .. } => {
             out.push('(');
-            format_type(inner, out);
+            format_type(inner, module, compressed_table, mode, out);
             out.push(')');
         }
     }
@@ -249,15 +544,21 @@ fn format_literal(lit: &Literal, out: &mut String) {
     }
 }
 
-fn format_expr(expr: &Expr, out: &mut String) {
+fn format_expr(
+    expr: &Expr,
+    module: &Module,
+    compressed_table: Option<&Vec<String>>,
+    mode: FmtMode,
+    out: &mut String,
+) {
     match expr {
         Expr::Block { prefix, tail, .. } => {
             out.push('{');
             for e in prefix {
-                format_expr(e, out);
+                format_expr(e, module, compressed_table, mode, out);
                 out.push(';');
             }
-            format_expr(tail, out);
+            format_expr(tail, module, compressed_table, mode, out);
             out.push('}');
         }
         Expr::Unit(_) => out.push_str("()"),
@@ -267,131 +568,217 @@ fn format_expr(expr: &Expr, out: &mut String) {
             value,
             body,
             ..
-        } => {
-            out.push_str("v(");
-            out.push_str(&name.name);
-            if let Some(ty) = ty {
-                out.push(':');
-                format_type(ty, out);
+        } => match mode {
+            FmtMode::Readable => {
+                out.push_str("v(");
+                out.push_str(&render_name(module, name, compressed_table, mode));
+                if let Some(ty) = ty {
+                    out.push(':');
+                    format_type(ty, module, compressed_table, mode, out);
+                }
+                out.push('=');
+                format_expr(value, module, compressed_table, mode, out);
+                out.push(',');
+                format_expr(body, module, compressed_table, mode, out);
+                out.push(')');
             }
-            out.push('=');
-            format_expr(value, out);
-            out.push(',');
-            format_expr(body, out);
-            out.push(')');
-        }
+            FmtMode::Compressed => {
+                out.push_str("[v ");
+                out.push_str(&render_name(module, name, compressed_table, mode));
+                out.push(' ');
+                format_expr(value, module, compressed_table, mode, out);
+                out.push(' ');
+                format_expr(body, module, compressed_table, mode, out);
+                out.push(']');
+            }
+        },
         Expr::If {
             cond,
             then_branch,
             else_branch,
             ..
-        } => {
-            out.push_str("i(");
-            format_expr(cond, out);
-            out.push(',');
-            format_expr(then_branch, out);
-            out.push(',');
-            format_expr(else_branch, out);
-            out.push(')');
-        }
+        } => match mode {
+            FmtMode::Readable => {
+                out.push_str("i(");
+                format_expr(cond, module, compressed_table, mode, out);
+                out.push(',');
+                format_expr(then_branch, module, compressed_table, mode, out);
+                out.push(',');
+                format_expr(else_branch, module, compressed_table, mode, out);
+                out.push(')');
+            }
+            FmtMode::Compressed => {
+                out.push_str("[i ");
+                format_expr(cond, module, compressed_table, mode, out);
+                out.push(' ');
+                format_expr(then_branch, module, compressed_table, mode, out);
+                out.push(' ');
+                format_expr(else_branch, module, compressed_table, mode, out);
+                out.push(']');
+            }
+        },
         Expr::Match {
             scrutinee, arms, ..
-        } => {
-            out.push_str("m(");
-            format_expr(scrutinee, out);
-            out.push_str("){");
-            for arm in arms {
-                format_pattern(&arm.pattern, out);
-                out.push_str("=>");
-                format_expr(&arm.expr, out);
-                out.push(';');
+        } => match mode {
+            FmtMode::Readable => {
+                out.push_str("m(");
+                format_expr(scrutinee, module, compressed_table, mode, out);
+                out.push_str("){");
+                for arm in arms {
+                    format_pattern(&arm.pattern, module, compressed_table, mode, out);
+                    out.push_str("=>");
+                    format_expr(&arm.expr, module, compressed_table, mode, out);
+                    out.push(';');
+                }
+                out.push('}');
             }
-            out.push('}');
-        }
-        Expr::Call { callee, args, .. } => {
-            out.push_str("c(");
-            format_expr(callee, out);
-            for arg in args {
-                out.push(',');
-                format_expr(arg, out);
+            FmtMode::Compressed => {
+                out.push_str("[m ");
+                format_expr(scrutinee, module, compressed_table, mode, out);
+                for arm in arms {
+                    out.push(' ');
+                    format_compressed_match_arm(arm, module, compressed_table, mode, out);
+                }
+                out.push(']');
             }
-            out.push(')');
-        }
+        },
+        Expr::Call { callee, args, .. } => match mode {
+            FmtMode::Readable => {
+                out.push_str("c(");
+                format_expr(callee, module, compressed_table, mode, out);
+                for arg in args {
+                    out.push(',');
+                    format_expr(arg, module, compressed_table, mode, out);
+                }
+                out.push(')');
+            }
+            FmtMode::Compressed => {
+                out.push('(');
+                format_expr(callee, module, compressed_table, mode, out);
+                for arg in args {
+                    out.push(' ');
+                    format_expr(arg, module, compressed_table, mode, out);
+                }
+                out.push(')');
+            }
+        },
         Expr::Lambda {
             params,
             ret,
             effects,
             body,
             ..
-        } => {
-            out.push_str("l(");
-            for (i, p) in params.iter().enumerate() {
-                if i > 0 {
-                    out.push(',');
-                }
-                out.push_str(&p.name.name);
-                out.push(':');
-                format_type(&p.ty, out);
+        } => match mode {
+            FmtMode::Readable => {
+                out.push_str("l(");
+                format_params(params, module, compressed_table, mode, out);
+                out.push_str("):");
+                format_type(ret, module, compressed_table, mode, out);
+                format_effect_set(effects, mode, out);
+                out.push('=');
+                format_expr(body, module, compressed_table, mode, out);
             }
-            out.push_str("):");
-            format_type(ret, out);
-            format_effect_set(effects, out);
-            out.push('=');
-            format_expr(body, out);
-        }
+            FmtMode::Compressed => {
+                out.push_str("[l (");
+                format_params(params, module, compressed_table, mode, out);
+                out.push_str("):");
+                format_type(ret, module, compressed_table, mode, out);
+                format_effect_set(effects, mode, out);
+                out.push(' ');
+                format_expr(body, module, compressed_table, mode, out);
+                out.push(']');
+            }
+        },
         Expr::Assert { cond, msg, .. } => {
             out.push_str("a(");
-            format_expr(cond, out);
+            format_expr(cond, module, compressed_table, mode, out);
             if let Some(msg) = msg {
                 out.push(',');
-                format_expr(msg, out);
+                format_expr(msg, module, compressed_table, mode, out);
             }
             out.push(')');
         }
         Expr::Require { expr, .. } => {
             out.push('^');
-            format_expr(expr, out);
+            format_expr(expr, module, compressed_table, mode, out);
         }
         Expr::Ensure { expr, .. } => {
             out.push('_');
             out.push(' ');
-            format_expr(expr, out);
+            format_expr(expr, module, compressed_table, mode, out);
         }
-        Expr::Name(id) => out.push_str(&id.name),
+        Expr::Name(id) => out.push_str(&render_name(module, id, compressed_table, mode)),
         Expr::NameApp { name, args, .. } => {
-            out.push_str(&name.name);
+            out.push_str(&render_name(module, name, compressed_table, mode));
             out.push('(');
             for (i, arg) in args.iter().enumerate() {
                 if i > 0 {
                     out.push(',');
                 }
-                format_expr(arg, out);
+                format_expr(arg, module, compressed_table, mode, out);
             }
             out.push(')');
         }
         Expr::Literal(lit) => format_literal(lit, out),
         Expr::Paren { inner, .. } => {
             out.push('(');
-            format_expr(inner, out);
+            format_expr(inner, module, compressed_table, mode, out);
             out.push(')');
         }
     }
 }
 
-fn format_pattern(pat: &Pattern, out: &mut String) {
+fn format_params(
+    params: &[Param],
+    module: &Module,
+    compressed_table: Option<&Vec<String>>,
+    mode: FmtMode,
+    out: &mut String,
+) {
+    for (i, p) in params.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push_str(&render_name(module, &p.name, compressed_table, mode));
+        out.push(':');
+        format_type(&p.ty, module, compressed_table, mode, out);
+    }
+}
+
+fn format_compressed_match_arm(
+    arm: &MatchArm,
+    module: &Module,
+    compressed_table: Option<&Vec<String>>,
+    mode: FmtMode,
+    out: &mut String,
+) {
+    out.push('{');
+    format_pattern(&arm.pattern, module, compressed_table, mode, out);
+    out.push(' ');
+    format_expr(&arm.expr, module, compressed_table, mode, out);
+    out.push('}');
+}
+
+fn format_pattern(
+    pat: &Pattern,
+    module: &Module,
+    compressed_table: Option<&Vec<String>>,
+    mode: FmtMode,
+    out: &mut String,
+) {
     match pat {
         Pattern::Wildcard(_) => out.push('_'),
         Pattern::Literal(lit) => format_literal(lit, out),
-        Pattern::Name(id) => out.push_str(&id.name),
+        Pattern::Name(id) => out.push_str(&render_name(module, id, compressed_table, mode)),
         Pattern::Ctor { name, args, .. } => {
-            out.push_str(&name.name);
+            out.push_str(&render_name(module, name, compressed_table, mode));
             if !args.is_empty() {
                 out.push('(');
                 for (i, arg) in args.iter().enumerate() {
                     if i > 0 {
                         out.push(',');
                     }
-                    format_pattern(arg, out);
+                    format_pattern(arg, module, compressed_table, mode, out);
                 }
                 out.push(')');
             }
@@ -402,13 +789,13 @@ fn format_pattern(pat: &Pattern, out: &mut String) {
                 if i > 0 {
                     out.push(',');
                 }
-                format_pattern(item, out);
+                format_pattern(item, module, compressed_table, mode, out);
             }
             out.push(')');
         }
         Pattern::Paren { inner, .. } => {
             out.push('(');
-            format_pattern(inner, out);
+            format_pattern(inner, module, compressed_table, mode, out);
             out.push(')');
         }
     }

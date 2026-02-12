@@ -21,6 +21,7 @@ pub struct Program {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Module {
     pub mod_id: ModId,
+    pub symtab: Option<Vec<String>>,
     pub decls: Vec<Decl>,
     pub span: Span,
 }
@@ -85,10 +86,52 @@ pub struct FunctionDecl {
     pub span: Span,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Name {
+    Ident(String),
+    Sym(u32),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Ident {
-    pub name: String,
+    pub name: Name,
     pub span: Span,
+}
+
+impl Ident {
+    pub fn from_ident(name: impl Into<String>, span: Span) -> Self {
+        Self {
+            name: Name::Ident(name.into()),
+            span,
+        }
+    }
+
+    pub fn from_sym(sym: u32, span: Span) -> Self {
+        Self {
+            name: Name::Sym(sym),
+            span,
+        }
+    }
+
+    pub fn resolved<'a>(&'a self, symtab: Option<&'a [String]>) -> Option<&'a str> {
+        match &self.name {
+            Name::Ident(name) => Some(name.as_str()),
+            Name::Sym(idx) => symtab.and_then(|table| table.get(*idx as usize).map(String::as_str)),
+        }
+    }
+
+    pub fn display(&self) -> String {
+        match &self.name {
+            Name::Ident(name) => name.clone(),
+            Name::Sym(idx) => format!("#{idx}"),
+        }
+    }
+
+    pub fn resolved_string(&self, symtab: Option<&[String]>) -> String {
+        self.resolved(symtab)
+            .map(str::to_string)
+            .unwrap_or_else(|| self.display())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

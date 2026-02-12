@@ -42,6 +42,43 @@ fn fmt_check_examples_succeeds() {
 }
 
 #[test]
+fn fmt_check_compressed_mode_on_examples_succeeds() {
+    let exe = env!("CARGO_BIN_EXE_muc");
+    let dir = unique_temp_dir("fmt_mode");
+    fs::create_dir_all(&dir).expect("temp dir should be created");
+    let file = dir.join("m.mu");
+    fs::write(&file, "@m{F main:()->i32=0;}").expect("temp source should be written");
+
+    let fmt = Command::new(exe)
+        .args([
+            "fmt",
+            "--mode=compressed",
+            file.to_str().expect("utf8 path"),
+        ])
+        .output()
+        .expect("binary should run");
+    assert!(fmt.status.success(), "compressed formatting should succeed");
+
+    let output = Command::new(exe)
+        .args([
+            "fmt",
+            "--mode=compressed",
+            "--check",
+            file.to_str().expect("utf8 path"),
+        ])
+        .output()
+        .expect("binary should run");
+
+    assert!(
+        output.status.success(),
+        "compressed --check should pass after compressed formatting"
+    );
+
+    let _ = fs::remove_file(file);
+    let _ = fs::remove_dir(dir);
+}
+
+#[test]
 fn check_examples_succeeds() {
     let exe = env!("CARGO_BIN_EXE_muc");
     let output = Command::new(exe)

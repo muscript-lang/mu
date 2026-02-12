@@ -31,3 +31,19 @@ fn rejects_unterminated_block_comment() {
     assert_eq!(err.code, LexErrorCode::UnterminatedBlockComment);
     assert_eq!(err.code.as_str(), "E1005");
 }
+
+#[test]
+fn lexes_symtab_symref_brackets_and_sexpr() {
+    let src = "@m{$[a,b];F #0:()->i32=[i t (#1 1) 0];}";
+    let tokens = tokenize(src).expect("source should lex");
+    assert!(
+        tokens.iter().any(|t| matches!(t.kind, TokenKind::Dollar)),
+        "should lex `$`"
+    );
+    assert!(
+        tokens
+            .iter()
+            .any(|t| matches!(t.kind, TokenKind::SymRef(0))),
+        "should lex symbol references"
+    );
+}

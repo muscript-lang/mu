@@ -1,6 +1,7 @@
 use std::fs;
 
 use muc::bytecode::compile;
+use muc::fmt::{FmtMode, format_program_mode};
 use muc::lexer::{TokenKind, tokenize};
 use muc::parser::parse_str;
 
@@ -29,4 +30,28 @@ fn token_efficiency_benchmark_bytecode_bytes_per_token() {
             "token efficiency regression for {example}: bytes/token={ratio:.4}"
         );
     }
+}
+
+#[test]
+fn compressed_mode_reduces_token_count_for_repeated_names() {
+    let src = "@m.repeat{:io=core.io;F very_long_helper_name:()->i32!{io}={c(println,\"x\");0};F main:()->i32!{io}={c(very_long_helper_name);c(very_long_helper_name);c(very_long_helper_name);c(very_long_helper_name);c(very_long_helper_name);c(very_long_helper_name);c(very_long_helper_name);c(very_long_helper_name);c(very_long_helper_name);c(very_long_helper_name);c(very_long_helper_name);c(very_long_helper_name);0};}";
+    let program = parse_str(src).expect("source should parse");
+    let readable = format_program_mode(&program, FmtMode::Readable);
+    let compressed = format_program_mode(&program, FmtMode::Compressed);
+
+    let readable_tokens = tokenize(&readable)
+        .expect("readable should lex")
+        .iter()
+        .filter(|t| !matches!(t.kind, TokenKind::Eof))
+        .count();
+    let compressed_tokens = tokenize(&compressed)
+        .expect("compressed should lex")
+        .iter()
+        .filter(|t| !matches!(t.kind, TokenKind::Eof))
+        .count();
+
+    assert!(
+        compressed_tokens < readable_tokens,
+        "compressed mode should reduce token count on repeated-name sources"
+    );
 }

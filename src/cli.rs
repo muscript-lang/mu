@@ -5,12 +5,12 @@ use std::path::{Path, PathBuf};
 use crate::ast::Span;
 use crate::ast::{Decl, Program};
 use crate::bytecode;
-use crate::fmt::{collect_mu_files, parse_and_format};
+use crate::fmt::{FmtMode, collect_mu_files, parse_and_format_mode};
 use crate::parser::{ParseError, parse_str};
 use crate::typecheck::{TypeError, check_program_with_modules, validate_modules};
 use crate::vm::run_bytecode;
 
-const HELP: &str = "muc - muScript compiler toolchain (v0.1)\n\nUSAGE:\n  muc fmt <file|dir> [--check]\n  muc check <file|dir>\n  muc run <file.mu|file.mub> [-- args...]\n  muc build <file.mu> -o <out.mub>\n";
+const HELP: &str = "muc - muScript compiler toolchain (v0.2)\n\nUSAGE:\n  muc fmt <file|dir> [--mode=readable|compressed] [--check]\n  muc check <file|dir>\n  muc run <file.mu|file.mub> [-- args...]\n  muc build <file.mu> -o <out.mub>\n";
 
 pub fn run() -> Result<(), String> {
     let mut args: Vec<String> = env::args().collect();
@@ -28,7 +28,9 @@ pub fn run() -> Result<(), String> {
     let command_args = &args[1..];
 
     match command.as_str() {
-        "fmt" => parse_fmt(command_args).and_then(|(path, check)| cmd_fmt(&path, check)),
+        "fmt" => {
+            parse_fmt(command_args).and_then(|(path, check, mode)| cmd_fmt(&path, check, mode))
+        }
         "check" => parse_check(command_args).and_then(|path| cmd_check(&path)),
         "run" => parse_run(command_args).and_then(|(file, rest)| cmd_run(&file, &rest)),
         "build" => parse_build(command_args).and_then(|(file, out)| cmd_build(&file, &out)),
@@ -36,23 +38,36 @@ pub fn run() -> Result<(), String> {
     }
 }
 
-fn parse_fmt(args: &[String]) -> Result<(PathBuf, bool), String> {
+fn parse_fmt(args: &[String]) -> Result<(PathBuf, bool, FmtMode), String> {
     if args.is_empty() || args.iter().any(|a| a == "--help" || a == "-h") {
-        return Err("usage: muc fmt <file|dir> [--check]".to_string());
+        return Err("usage: muc fmt <file|dir> [--mode=readable|compressed] [--check]".to_string());
     }
     let mut path: Option<PathBuf> = None;
     let mut check = false;
+    let mut mode = FmtMode::Readable;
     for arg in args {
         if arg == "--check" {
             check = true;
+        } else if let Some(v) = arg.strip_prefix("--mode=") {
+            mode = match v {
+                "readable" => FmtMode::Readable,
+                "compressed" => FmtMode::Compressed,
+                _ => {
+                    return Err(format!(
+                        "invalid --mode `{v}`; expected `readable` or `compressed`"
+                    ));
+                }
+            };
         } else if path.is_none() {
             path = Some(PathBuf::from(arg));
         } else {
             return Err(format!("unknown argument for fmt: `{arg}`"));
         }
     }
-    let path = path.ok_or_else(|| "usage: muc fmt <file|dir> [--check]".to_string())?;
-    Ok((path, check))
+    let path = path.ok_or_else(|| {
+        "usage: muc fmt <file|dir> [--mode=readable|compressed] [--check]".to_string()
+    })?;
+    Ok((path, check, mode))
 }
 
 fn parse_check(args: &[String]) -> Result<PathBuf, String> {
@@ -83,7 +98,7 @@ fn parse_build(args: &[String]) -> Result<(PathBuf, PathBuf), String> {
     Ok((PathBuf::from(&args[0]), PathBuf::from(&args[2])))
 }
 
-fn cmd_fmt(path: &Path, check: bool) -> Result<(), String> {
+fn cmd_fmt(path: &Path, check: bool, mode: FmtMode) -> Result<(), String> {
     let files = collect_mu_files(path)?;
     if files.is_empty() {
         return Err(format!("no .mu files found under {}", path.display()));
@@ -94,7 +109,8 @@ fn cmd_fmt(path: &Path, check: bool) -> Result<(), String> {
     for file in files {
         let src = fs::read_to_string(&file)
             .map_err(|e| format!("failed reading {}: {e}", file.display()))?;
-        let formatted = parse_and_format(&src).map_err(|e| format_parse_error(&file, &src, &e))?;
+        let formatted =
+            parse_and_format_mode(&src, mode).map_err(|e| format_parse_error(&file, &src, &e))?;
 
         if src != formatted {
             if check {

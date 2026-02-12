@@ -258,6 +258,116 @@ Host calls for stdlib, tagged by effect.
 Define a stable .mub bytecode format:
 header MUB1
 constant pool (strings, ints optional)
+
+---
+
+## v0.2 Addendum (Backward-Compatible Syntax Compression)
+
+This section defines v0.2 additions. All v0.1 programs remain valid in v0.2 without behavior changes.
+
+### A. Module Symbol Table and Symbol References
+
+v0.2 adds an optional module-level symbol table directive:
+
+`$[sym0,sym1,...];`
+
+and symbol references:
+
+`#<int>`
+
+Rules:
+- Symbol table declaration is optional.
+- If a symbol table exists, `#n` MUST resolve to the `n`th entry (0-based).
+- Identifiers may still appear alongside `#n` (mixed mode is valid).
+- If `#n` appears and no symbol table is declared, parsing fails.
+- If `#n` is out of bounds for the table, parsing fails.
+
+Canonical placement:
+- In v0.2 compressed canonical form, `$[...]` is emitted once at module start, immediately after `{` and before any declarations.
+
+### B. Formatting Modes
+
+`muc fmt` supports:
+- `--mode=readable` (default): v0.1 canonical printing.
+- `--mode=compressed`: v0.2 compressed canonical printing.
+
+`--check` applies in both modes.
+
+### C. New Optional Expression Forms
+
+#### C.1 S-expression call form
+
+`( <expr> <expr>* )`
+
+Semantics: equivalent to `c(fn,arg1,...)`.
+
+Disambiguation in expression context:
+- `()` -> unit literal
+- `(e)` -> parenthesized expression
+- `(e e2 ...)` -> s-expression call
+
+#### C.2 Bracket special forms
+
+The following bracket forms are syntax sugar for existing core forms:
+
+- `[v <name> <expr> <expr>]` == `v(name=<expr>,<expr>)`
+- `[i <cond> <then> <else>]` == `i(<cond>,<then>,<else>)`
+- `[m <expr> {<pat> <expr>}+]` == `m(<expr>){<pat>=><expr>;...}`
+- `[l (<params>) :<type> <effopt?> <expr>]` == `l(<params>):<type><effopt?>=<expr>`
+
+`<effopt?>` is optional and uses existing effect-set syntax `!{...}`.
+
+### D. Compressed Effect Atom Aliases
+
+Compressed single-letter aliases are supported in parsing and used by compressed formatting:
+
+- `io -> I`
+- `fs -> F`
+- `net -> N`
+- `proc -> P`
+- `rand -> R`
+- `time -> T`
+- `st -> S`
+
+Parser acceptance:
+- Parser accepts both long and short atoms in effect sets.
+
+Formatter behavior:
+- Readable mode prints long atoms (`io`, `fs`, ...).
+- Compressed mode prints short atoms (`I`, `F`, ...).
+
+Canonical effect ordering is unchanged semantically and remains:
+`io, fs, net, proc, rand, time, st`
+
+### E. Compressed Canonicalization Rules
+
+In compressed mode, formatter MUST:
+- Emit a symbol table `$[...]` at module start.
+- Rewrite eligible identifiers to `#n`.
+- Print call expressions as s-expr calls: `(fn arg1 arg2)`.
+- Print special forms using bracket syntax: `[v ...]`, `[i ...]`, `[m ...]`, `[l ...]`.
+- Print non-empty effect sets using short atoms in canonical order.
+
+Eligible names for `#n` rewriting:
+- Module import aliases.
+- Export names.
+- Type declaration names.
+- Type parameter names.
+- Constructor names.
+- Value/function declaration names.
+- Expression name references and name-application callee names.
+- Pattern names and constructor names.
+- Named type references.
+
+Deterministic symbol table ordering:
+- v0.2 uses **sorted unique symbols in lexicographic order**.
+
+### F. Semantics Preservation
+
+Readable and compressed forms are surface syntax variants only.
+- They must parse to equivalent core semantics.
+- Type/effect checking rules are unchanged.
+- Runtime behavior is unchanged.
 function table (name, arity, locals, bytecode)
 export table
 13. CLI tools (deliverables)

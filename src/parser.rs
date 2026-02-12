@@ -2,7 +2,7 @@ use std::fmt;
 
 use crate::ast::{
     CtorDecl, Decl, EffectAtom, EffectSet, ExportDecl, Expr, FunctionDecl, FunctionType, Ident,
-    ImportDecl, Literal, MatchArm, ModId, Module, Param, Pattern, PrimType, Program, Span,
+    ImportDecl, Literal, MatchArm, ModId, Module, Name, Param, Pattern, PrimType, Program, Span,
     TypeDecl, TypeExpr, ValueDecl,
 };
 use crate::lexer::{LexError, Token, TokenKind, tokenize};
@@ -14,6 +14,8 @@ pub enum ParseErrorCode {
     ExpectedIdent,
     ExpectedType,
     ExpectedExpr,
+    MissingSymbolTable,
+    SymbolRefOutOfRange,
 }
 
 impl ParseErrorCode {
@@ -24,6 +26,8 @@ impl ParseErrorCode {
             ParseErrorCode::ExpectedIdent => "E2003",
             ParseErrorCode::ExpectedType => "E2004",
             ParseErrorCode::ExpectedExpr => "E2005",
+            ParseErrorCode::MissingSymbolTable => "E2006",
+            ParseErrorCode::SymbolRefOutOfRange => "E2007",
         }
     }
 }
@@ -62,13 +66,18 @@ impl From<LexError> for ParseError {
 
 pub fn parse_str(src: &str) -> Result<Program, ParseError> {
     let tokens = tokenize(src)?;
-    let mut p = Parser { tokens, pos: 0 };
+    let mut p = Parser {
+        tokens,
+        pos: 0,
+        current_symtab: None,
+    };
     p.parse_program()
 }
 
 struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+    current_symtab: Option<Vec<String>>,
 }
 
 impl Parser {
@@ -82,27 +91,63 @@ impl Parser {
         let start = self.expect_simple(TokenKind::At, "expected `@` for module start")?;
         let mod_id = self.parse_mod_id()?;
         self.expect_simple(TokenKind::LBrace, "expected `{` after module id")?;
+        let symtab = if self.at_simple(TokenKind::Dollar) {
+            Some(self.parse_symtab_decl()?)
+        } else {
+            None
+        };
+        self.current_symtab = symtab.clone();
         let mut decls = Vec::new();
         while !self.at_simple(TokenKind::RBrace) {
             decls.push(self.parse_decl()?);
         }
         let end = self.expect_simple(TokenKind::RBrace, "expected `}` to close module")?;
+        self.current_symtab = None;
         Ok(Module {
             mod_id,
+            symtab,
             decls,
             span: start.span.merge(end.span),
         })
     }
 
+    fn parse_symtab_decl(&mut self) -> Result<Vec<String>, ParseError> {
+        self.expect_simple(
+            TokenKind::Dollar,
+            "expected `$` in symbol table declaration",
+        )?;
+        self.expect_simple(
+            TokenKind::LBracket,
+            "expected `[` in symbol table declaration",
+        )?;
+        let mut names = Vec::new();
+        if !self.at_simple(TokenKind::RBracket) {
+            names.push(self.expect_plain_ident("expected symbol identifier")?);
+            while self.at_simple(TokenKind::Comma) {
+                self.bump();
+                names.push(self.expect_plain_ident("expected symbol identifier after `,`")?);
+            }
+        }
+        self.expect_simple(
+            TokenKind::RBracket,
+            "expected `]` in symbol table declaration",
+        )?;
+        self.expect_simple(
+            TokenKind::Semicolon,
+            "expected `;` after symbol table declaration",
+        )?;
+        Ok(names)
+    }
+
     fn parse_mod_id(&mut self) -> Result<ModId, ParseError> {
-        let first = self.expect_ident("expected module identifier")?;
-        let mut parts = vec![first.name];
-        let mut span = first.span;
+        let first = self.expect_plain_ident("expected module identifier")?;
+        let mut parts = vec![first];
+        let mut span = self.tokens[self.pos - 1].span;
         while self.at_simple(TokenKind::Dot) {
             self.bump();
-            let part = self.expect_ident("expected identifier after `.`")?;
-            span = span.merge(part.span);
-            parts.push(part.name);
+            let part = self.expect_plain_ident("expected identifier after `.`")?;
+            span = span.merge(self.tokens[self.pos - 1].span);
+            parts.push(part);
         }
         Ok(ModId { parts, span })
     }
@@ -132,7 +177,7 @@ impl Parser {
 
     fn parse_import_decl(&mut self) -> Result<ImportDecl, ParseError> {
         let start = self.expect_simple(TokenKind::Colon, "expected `:` for import")?;
-        let alias = self.expect_ident("expected import alias")?;
+        let alias = self.expect_name("expected import alias")?;
         self.expect_simple(TokenKind::Eq, "expected `=` in import")?;
         let module = self.parse_mod_id()?;
         let end = self.expect_simple(TokenKind::Semicolon, "expected `;` after import")?;
@@ -148,7 +193,7 @@ impl Parser {
         self.expect_simple(TokenKind::LBracket, "expected `[` after E")?;
         let mut names = Vec::new();
         if !self.at_simple(TokenKind::RBracket) {
-            names = self.parse_ident_list()?;
+            names = self.parse_name_list()?;
         }
         self.expect_simple(TokenKind::RBracket, "expected `]` in export decl")?;
         let end = self.expect_simple(TokenKind::Semicolon, "expected `;` after export")?;
@@ -160,7 +205,7 @@ impl Parser {
 
     fn parse_type_decl(&mut self) -> Result<TypeDecl, ParseError> {
         let start = self.expect_ident_text("T", "expected `T`")?;
-        let name = self.expect_ident("expected type name")?;
+        let name = self.expect_name("expected type name")?;
         let params = if self.at_simple(TokenKind::LBracket) {
             self.parse_type_params()?
         } else {
@@ -183,7 +228,7 @@ impl Parser {
     }
 
     fn parse_ctor_decl(&mut self) -> Result<CtorDecl, ParseError> {
-        let name = self.expect_ident("expected constructor name")?;
+        let name = self.expect_name("expected constructor name")?;
         if !self.at_simple(TokenKind::LParen) {
             return Ok(CtorDecl {
                 span: name.span,
@@ -206,7 +251,7 @@ impl Parser {
 
     fn parse_value_decl(&mut self) -> Result<ValueDecl, ParseError> {
         let start = self.expect_ident_text("V", "expected `V`")?;
-        let name = self.expect_ident("expected value name")?;
+        let name = self.expect_name("expected value name")?;
         self.expect_simple(TokenKind::Colon, "expected `:` after value name")?;
         let ty = self.parse_type()?;
         self.expect_simple(TokenKind::Eq, "expected `=` after value type")?;
@@ -223,7 +268,7 @@ impl Parser {
 
     fn parse_function_decl(&mut self) -> Result<FunctionDecl, ParseError> {
         let start = self.expect_ident_text("F", "expected `F`")?;
-        let name = self.expect_ident("expected function name")?;
+        let name = self.expect_name("expected function name")?;
         let type_params = if self.at_simple(TokenKind::LBracket) {
             self.parse_type_params()?
         } else {
@@ -255,16 +300,16 @@ impl Parser {
                 message: "expected type parameter identifier".to_string(),
             });
         }
-        let params = self.parse_ident_list()?;
+        let params = self.parse_name_list()?;
         self.expect_simple(TokenKind::RBracket, "expected `]` after type parameters")?;
         Ok(params)
     }
 
-    fn parse_ident_list(&mut self) -> Result<Vec<Ident>, ParseError> {
-        let mut out = vec![self.expect_ident("expected identifier")?];
+    fn parse_name_list(&mut self) -> Result<Vec<Ident>, ParseError> {
+        let mut out = vec![self.expect_name("expected identifier")?];
         while self.at_simple(TokenKind::Comma) {
             self.bump();
-            out.push(self.expect_ident("expected identifier after `,`")?);
+            out.push(self.expect_name("expected identifier after `,`")?);
         }
         Ok(out)
     }
@@ -465,8 +510,8 @@ impl Parser {
     }
 
     fn parse_effect_atom(&mut self) -> Result<EffectAtom, ParseError> {
-        let ident = self.expect_ident("expected effect atom")?;
-        match ident.name.as_str() {
+        let ident = self.expect_plain_ident("expected effect atom")?;
+        match ident.as_str() {
             "io" => Ok(EffectAtom::Io),
             "fs" => Ok(EffectAtom::Fs),
             "net" => Ok(EffectAtom::Net),
@@ -474,27 +519,37 @@ impl Parser {
             "rand" => Ok(EffectAtom::Rand),
             "time" => Ok(EffectAtom::Time),
             "st" => Ok(EffectAtom::St),
+            "I" => Ok(EffectAtom::Io),
+            "F" => Ok(EffectAtom::Fs),
+            "N" => Ok(EffectAtom::Net),
+            "P" => Ok(EffectAtom::Proc),
+            "R" => Ok(EffectAtom::Rand),
+            "T" => Ok(EffectAtom::Time),
+            "S" => Ok(EffectAtom::St),
             _ => Err(ParseError {
                 code: ParseErrorCode::ExpectedToken,
-                span: ident.span,
-                message: format!("unknown effect atom `{}`", ident.name),
+                span: self.tokens[self.pos - 1].span,
+                message: format!("unknown effect atom `{ident}`"),
             }),
         }
     }
 
     fn parse_named_or_prim_type(&mut self) -> Result<TypeExpr, ParseError> {
-        let name = self.expect_ident("expected type")?;
-        let prim = match name.name.as_str() {
-            "b" => Some(PrimType::Bool),
-            "s" => Some(PrimType::String),
-            "i32" => Some(PrimType::I32),
-            "i64" => Some(PrimType::I64),
-            "u32" => Some(PrimType::U32),
-            "u64" => Some(PrimType::U64),
-            "f32" => Some(PrimType::F32),
-            "f64" => Some(PrimType::F64),
-            "unit" => Some(PrimType::Unit),
-            _ => None,
+        let name = self.expect_name("expected type")?;
+        let prim = match &name.name {
+            Name::Ident(s) => match s.as_str() {
+                "b" => Some(PrimType::Bool),
+                "s" => Some(PrimType::String),
+                "i32" => Some(PrimType::I32),
+                "i64" => Some(PrimType::I64),
+                "u32" => Some(PrimType::U32),
+                "u64" => Some(PrimType::U64),
+                "f32" => Some(PrimType::F32),
+                "f64" => Some(PrimType::F64),
+                "unit" => Some(PrimType::Unit),
+                _ => None,
+            },
+            Name::Sym(_) => None,
         };
         if let Some(p) = prim {
             return Ok(TypeExpr::Prim(p, name.span));
@@ -514,6 +569,9 @@ impl Parser {
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
         if self.at_simple(TokenKind::LBrace) {
             return self.parse_block_expr();
+        }
+        if self.at_simple(TokenKind::LBracket) {
+            return self.parse_bracket_expr();
         }
         if self.at_ident_text("v") && self.lookahead_is_simple(1, TokenKind::LParen) {
             return self.parse_let_expr();
@@ -557,10 +615,22 @@ impl Parser {
                 let close = self.bump();
                 return Ok(Expr::Unit(open.span.merge(close.span)));
             }
-            let inner = self.parse_expr()?;
+            let first = self.parse_expr()?;
+            if self.at_simple(TokenKind::RParen) {
+                let close = self.bump();
+                return Ok(Expr::Paren {
+                    inner: Box::new(first),
+                    span: open.span.merge(close.span),
+                });
+            }
+            let mut args = Vec::new();
+            while !self.at_simple(TokenKind::RParen) {
+                args.push(self.parse_expr()?);
+            }
             let close = self.expect_simple(TokenKind::RParen, "expected `)`")?;
-            return Ok(Expr::Paren {
-                inner: Box::new(inner),
+            return Ok(Expr::Call {
+                callee: Box::new(first),
+                args,
                 span: open.span.merge(close.span),
             });
         }
@@ -585,7 +655,7 @@ impl Parser {
         {
             return self.parse_symbol_name_expr();
         }
-        if matches!(self.peek().kind, TokenKind::Ident(_)) {
+        if matches!(self.peek().kind, TokenKind::Ident(_) | TokenKind::SymRef(_)) {
             return self.parse_name_or_name_app();
         }
 
@@ -597,14 +667,24 @@ impl Parser {
     }
 
     fn parse_name_or_name_app(&mut self) -> Result<Expr, ParseError> {
-        let name = self.expect_ident("expected identifier")?;
+        let name = self.expect_name("expected identifier")?;
         if !self.at_simple(TokenKind::LParen) {
             return Ok(Expr::Name(name));
         }
+        let checkpoint = self.pos;
         self.bump();
         let mut args = Vec::new();
         if !self.at_simple(TokenKind::RParen) {
-            args = self.parse_expr_list()?;
+            let first = self.parse_expr()?;
+            if !self.at_simple(TokenKind::Comma) && !self.at_simple(TokenKind::RParen) {
+                self.pos = checkpoint;
+                return Ok(Expr::Name(name));
+            }
+            args.push(first);
+            while self.at_simple(TokenKind::Comma) {
+                self.bump();
+                args.push(self.parse_expr()?);
+            }
         }
         let close = self.expect_simple(TokenKind::RParen, "expected `)` in name application")?;
         Ok(Expr::NameApp {
@@ -637,7 +717,7 @@ impl Parser {
             }
         };
         Ok(Expr::Name(Ident {
-            name: name.to_string(),
+            name: Name::Ident(name.to_string()),
             span: token.span,
         }))
     }
@@ -674,7 +754,7 @@ impl Parser {
     fn parse_let_expr(&mut self) -> Result<Expr, ParseError> {
         let start = self.expect_ident_text("v", "expected `v`")?;
         self.expect_simple(TokenKind::LParen, "expected `(` in let expression")?;
-        let name = self.expect_ident("expected let binding name")?;
+        let name = self.expect_name("expected let binding name")?;
         let ty = if self.at_simple(TokenKind::Colon) {
             self.bump();
             Some(self.parse_type()?)
@@ -787,7 +867,7 @@ impl Parser {
     }
 
     fn parse_param(&mut self) -> Result<Param, ParseError> {
-        let name = self.expect_ident("expected parameter name")?;
+        let name = self.expect_name("expected parameter name")?;
         self.expect_simple(TokenKind::Colon, "expected `:` in parameter")?;
         let ty = self.parse_type()?;
         Ok(Param {
@@ -813,6 +893,104 @@ impl Parser {
             msg,
             span: start.span.merge(close.span),
         })
+    }
+
+    fn parse_bracket_expr(&mut self) -> Result<Expr, ParseError> {
+        let open = self.expect_simple(TokenKind::LBracket, "expected `[`")?;
+        let head = self.expect_plain_ident("expected bracket form head")?;
+        let expr = match head.as_str() {
+            "v" => {
+                let name = self.expect_name("expected let binding name")?;
+                let value = self.parse_expr()?;
+                let body = self.parse_expr()?;
+                let close =
+                    self.expect_simple(TokenKind::RBracket, "expected `]` in bracket let")?;
+                Expr::Let {
+                    name,
+                    ty: None,
+                    value: Box::new(value),
+                    body: Box::new(body),
+                    span: open.span.merge(close.span),
+                }
+            }
+            "i" => {
+                let cond = self.parse_expr()?;
+                let then_branch = self.parse_expr()?;
+                let else_branch = self.parse_expr()?;
+                let close =
+                    self.expect_simple(TokenKind::RBracket, "expected `]` in bracket if")?;
+                Expr::If {
+                    cond: Box::new(cond),
+                    then_branch: Box::new(then_branch),
+                    else_branch: Box::new(else_branch),
+                    span: open.span.merge(close.span),
+                }
+            }
+            "m" => {
+                let scrutinee = self.parse_expr()?;
+                let mut arms = Vec::new();
+                while self.at_simple(TokenKind::LBrace) {
+                    let arm_open = self.bump();
+                    let pattern = self.parse_pattern()?;
+                    let arm_expr = self.parse_expr()?;
+                    let arm_close =
+                        self.expect_simple(TokenKind::RBrace, "expected `}` in bracket match arm")?;
+                    arms.push(MatchArm {
+                        span: arm_open.span.merge(arm_close.span),
+                        pattern,
+                        expr: arm_expr,
+                    });
+                }
+                if arms.is_empty() {
+                    return Err(ParseError {
+                        code: ParseErrorCode::ExpectedExpr,
+                        span: self.peek().span,
+                        message: "bracket match requires at least one arm".to_string(),
+                    });
+                }
+                let close =
+                    self.expect_simple(TokenKind::RBracket, "expected `]` in bracket match")?;
+                Expr::Match {
+                    scrutinee: Box::new(scrutinee),
+                    arms,
+                    span: open.span.merge(close.span),
+                }
+            }
+            "l" => {
+                self.expect_simple(TokenKind::LParen, "expected `(` in bracket lambda")?;
+                let mut params = vec![self.parse_param()?];
+                while self.at_simple(TokenKind::Comma) {
+                    self.bump();
+                    params.push(self.parse_param()?);
+                }
+                self.expect_simple(TokenKind::RParen, "expected `)` in bracket lambda params")?;
+                self.expect_simple(TokenKind::Colon, "expected `:` in bracket lambda")?;
+                let ret = self.parse_type()?;
+                let effects = if self.at_simple(TokenKind::Bang) {
+                    self.parse_effect_set()?
+                } else {
+                    EffectSet::default()
+                };
+                let body = self.parse_expr()?;
+                let close =
+                    self.expect_simple(TokenKind::RBracket, "expected `]` in bracket lambda")?;
+                Expr::Lambda {
+                    params,
+                    ret,
+                    effects,
+                    body: Box::new(body),
+                    span: open.span.merge(close.span),
+                }
+            }
+            _ => {
+                return Err(ParseError {
+                    code: ParseErrorCode::ExpectedExpr,
+                    span: self.peek().span,
+                    message: format!("unknown bracket form `{head}`"),
+                });
+            }
+        };
+        Ok(expr)
     }
 
     fn parse_literal(&mut self) -> Result<Literal, ParseError> {
@@ -866,7 +1044,7 @@ impl Parser {
             });
         }
 
-        let name = self.expect_ident("expected pattern")?;
+        let name = self.expect_name("expected pattern")?;
         if !self.at_simple(TokenKind::LParen) {
             return Ok(Pattern::Name(name));
         }
@@ -892,13 +1070,10 @@ impl Parser {
         Ok(out)
     }
 
-    fn expect_ident(&mut self, message: &str) -> Result<Ident, ParseError> {
+    fn expect_plain_ident(&mut self, message: &str) -> Result<String, ParseError> {
         let token = self.bump();
         if let TokenKind::Ident(name) = token.kind {
-            return Ok(Ident {
-                name,
-                span: token.span,
-            });
+            return Ok(name);
         }
         Err(ParseError {
             code: ParseErrorCode::ExpectedIdent,
@@ -907,9 +1082,41 @@ impl Parser {
         })
     }
 
+    fn expect_name(&mut self, message: &str) -> Result<Ident, ParseError> {
+        let token = self.bump();
+        match token.kind {
+            TokenKind::Ident(name) => Ok(Ident::from_ident(name, token.span)),
+            TokenKind::SymRef(idx) => {
+                let Some(symtab) = self.current_symtab.as_ref() else {
+                    return Err(ParseError {
+                        code: ParseErrorCode::MissingSymbolTable,
+                        span: token.span,
+                        message: "symbol reference requires module symbol table".to_string(),
+                    });
+                };
+                if (idx as usize) >= symtab.len() {
+                    return Err(ParseError {
+                        code: ParseErrorCode::SymbolRefOutOfRange,
+                        span: token.span,
+                        message: format!(
+                            "symbol reference #{idx} out of range for table length {}",
+                            symtab.len()
+                        ),
+                    });
+                }
+                Ok(Ident::from_sym(idx, token.span))
+            }
+            _ => Err(ParseError {
+                code: ParseErrorCode::ExpectedIdent,
+                span: token.span,
+                message: message.to_string(),
+            }),
+        }
+    }
+
     fn expect_ident_text(&mut self, expected: &str, message: &str) -> Result<Ident, ParseError> {
-        let ident = self.expect_ident(message)?;
-        if ident.name == expected {
+        let ident = self.expect_name(message)?;
+        if matches!(&ident.name, Name::Ident(name) if name == expected) {
             return Ok(ident);
         }
         Err(ParseError {

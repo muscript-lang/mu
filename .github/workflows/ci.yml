@@ -14,5 +14,12 @@ jobs:
         run: cargo fmt --all -- --check
       - name: cargo test
         run: cargo test
-      - name: muc fmt check
-        run: cargo run -- fmt --check .
+      - name: muc fmt readable fixtures check
+        run: |
+          cargo run -- fmt --check examples
+          cargo run -- fmt --check tests/fixtures/parser
+          cargo run -- fmt --check tests/equiv/readable
+      - name: muc fmt compressed fixtures check
+        run: |
+          cargo run -- fmt --mode=compressed --check tests/fixtures/compressed
+          cargo run -- fmt --mode=compressed --check tests/equiv/compressed

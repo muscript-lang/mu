@@ -58,7 +58,9 @@ pub struct Token {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
     At,
+    Dollar,
     Colon,
+    Hash,
     Semicolon,
     Comma,
     Dot,
@@ -87,6 +89,7 @@ pub enum TokenKind {
     Gt,
     Ge,
     Underscore,
+    SymRef(u32),
     Ident(String),
     Int(i64),
     String(String),
@@ -129,6 +132,7 @@ impl<'a> Lexer<'a> {
 
             let token = match ch {
                 '@' => self.simple(idx, TokenKind::At),
+                '$' => self.simple(idx, TokenKind::Dollar),
                 ':' => self.simple(idx, TokenKind::Colon),
                 ';' => self.simple(idx, TokenKind::Semicolon),
                 ',' => self.simple(idx, TokenKind::Comma),
@@ -187,6 +191,7 @@ impl<'a> Lexer<'a> {
                 }
                 '?' => self.simple(idx, TokenKind::Question),
                 '^' => self.simple(idx, TokenKind::Caret),
+                '#' => self.lex_sym_ref()?,
                 '+' => self.simple(idx, TokenKind::Plus),
                 '*' => self.simple(idx, TokenKind::Star),
                 '%' => self.simple(idx, TokenKind::Percent),
@@ -486,6 +491,54 @@ impl<'a> Lexer<'a> {
                 end: self.last_end,
             },
             message: "unterminated string literal".to_string(),
+        })
+    }
+
+    fn lex_sym_ref(&mut self) -> Result<Token, LexError> {
+        let (start, _) = self.bump().expect("peeked before bump");
+        let Some((_, first_digit)) = self.peek() else {
+            return Err(LexError {
+                code: LexErrorCode::UnexpectedChar,
+                span: Span {
+                    start,
+                    end: start + 1,
+                },
+                message: "expected digits after `#`".to_string(),
+            });
+        };
+        if !first_digit.is_ascii_digit() {
+            return Err(LexError {
+                code: LexErrorCode::UnexpectedChar,
+                span: Span {
+                    start,
+                    end: start + 1,
+                },
+                message: "expected digits after `#`".to_string(),
+            });
+        }
+        while let Some((_, ch)) = self.peek() {
+            if ch.is_ascii_digit() {
+                self.bump();
+            } else {
+                break;
+            }
+        }
+
+        let text = &self.src[(start + 1)..self.last_end];
+        let value = text.parse::<u32>().map_err(|_| LexError {
+            code: LexErrorCode::IntOutOfRange,
+            span: Span {
+                start,
+                end: self.last_end,
+            },
+            message: "symbol reference out of range".to_string(),
+        })?;
+        Ok(Token {
+            kind: TokenKind::SymRef(value),
+            span: Span {
+                start,
+                end: self.last_end,
+            },
         })
     }
 

@@ -97,6 +97,7 @@ struct CtorSig {
     parent: String,
     type_params: Vec<String>,
     fields: Vec<TypeExpr>,
+    symtab: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -111,6 +112,7 @@ struct ModuleSigs {
 struct CheckCtx<'a> {
     module_name: &'a str,
     module: &'a ModuleSigs,
+    symtab: Option<&'a [String]>,
     locals: HashMap<String, Type>,
     return_type: Option<Type>,
     allow_return_magic: bool,
@@ -120,6 +122,10 @@ struct CheckCtx<'a> {
 struct ExprCheck {
     ty: Type,
     effects: EffectSet,
+}
+
+fn id_text(id: &crate::ast::Ident, symtab: Option<&[String]>) -> String {
+    id.resolved_string(symtab)
 }
 
 pub fn check_program(program: &Program) -> Result<(), TypeError> {
@@ -168,76 +174,92 @@ fn build_module_sigs(programs: &[Program]) -> Result<BTreeMap<String, ModuleSigs
         for decl in &program.module.decls {
             match decl {
                 Decl::Import(d) => {
-                    let prev =
-                        imports.insert(d.alias.name.clone(), modid_to_string(&d.module.parts));
+                    let alias = id_text(&d.alias, program.module.symtab.as_deref());
+                    let prev = imports.insert(alias.clone(), modid_to_string(&d.module.parts));
                     if prev.is_some() {
                         return Err(TypeError {
                             code: TypeErrorCode::DuplicateSymbol,
                             span: d.span,
-                            message: format!("duplicate import alias `{}`", d.alias.name),
+                            message: format!("duplicate import alias `{alias}`"),
                         });
                     }
                 }
                 Decl::Export(d) => {
                     for name in &d.names {
-                        if !exports.insert(name.name.clone()) {
+                        let exported = id_text(name, program.module.symtab.as_deref());
+                        if !exports.insert(exported.clone()) {
                             return Err(TypeError {
                                 code: TypeErrorCode::DuplicateSymbol,
                                 span: name.span,
-                                message: format!("duplicate export name `{}`", name.name),
+                                message: format!("duplicate export name `{exported}`"),
                             });
                         }
                     }
                 }
                 Decl::Type(d) => {
-                    let type_params = d.params.iter().map(|p| p.name.clone()).collect::<Vec<_>>();
+                    let type_params = d
+                        .params
+                        .iter()
+                        .map(|p| id_text(p, program.module.symtab.as_deref()))
+                        .collect::<Vec<_>>();
+                    let parent_name = id_text(&d.name, program.module.symtab.as_deref());
                     for ctor in &d.ctors {
-                        if ctors.contains_key(&ctor.name.name) {
+                        let ctor_name = id_text(&ctor.name, program.module.symtab.as_deref());
+                        if ctors.contains_key(&ctor_name) {
                             return Err(TypeError {
                                 code: TypeErrorCode::DuplicateSymbol,
                                 span: ctor.span,
-                                message: format!("duplicate constructor `{}`", ctor.name.name),
+                                message: format!("duplicate constructor `{ctor_name}`"),
                             });
                         }
                         ctors.insert(
-                            ctor.name.name.clone(),
+                            ctor_name,
                             CtorSig {
-                                parent: d.name.name.clone(),
+                                parent: parent_name.clone(),
                                 type_params: type_params.clone(),
                                 fields: ctor.fields.clone(),
+                                symtab: program.module.symtab.clone(),
                             },
                         );
                     }
                 }
                 Decl::Value(d) => {
-                    if values.contains_key(&d.name.name) {
+                    let value_name = id_text(&d.name, program.module.symtab.as_deref());
+                    if values.contains_key(&value_name) {
                         return Err(TypeError {
                             code: TypeErrorCode::DuplicateSymbol,
                             span: d.span,
-                            message: format!("duplicate value `{}`", d.name.name),
-                        });
-                    }
-                    values.insert(d.name.name.clone(), ast_type_to_type(&d.ty)?);
-                }
-                Decl::Function(d) => {
-                    validate_effect_set(&d.sig.effects, d.sig.span)?;
-                    if values.contains_key(&d.name.name) {
-                        return Err(TypeError {
-                            code: TypeErrorCode::DuplicateSymbol,
-                            span: d.span,
-                            message: format!("duplicate value `{}`", d.name.name),
+                            message: format!("duplicate value `{value_name}`"),
                         });
                     }
                     values.insert(
-                        d.name.name.clone(),
+                        value_name,
+                        ast_type_to_type(&d.ty, program.module.symtab.as_deref())?,
+                    );
+                }
+                Decl::Function(d) => {
+                    validate_effect_set(&d.sig.effects, d.sig.span)?;
+                    let fn_name = id_text(&d.name, program.module.symtab.as_deref());
+                    if values.contains_key(&fn_name) {
+                        return Err(TypeError {
+                            code: TypeErrorCode::DuplicateSymbol,
+                            span: d.span,
+                            message: format!("duplicate value `{fn_name}`"),
+                        });
+                    }
+                    values.insert(
+                        fn_name,
                         Type::Function {
                             params: d
                                 .sig
                                 .params
                                 .iter()
-                                .map(ast_type_to_type)
+                                .map(|t| ast_type_to_type(t, program.module.symtab.as_deref()))
                                 .collect::<Result<_, _>>()?,
-                            ret: Box::new(ast_type_to_type(&d.sig.ret)?),
+                            ret: Box::new(ast_type_to_type(
+                                &d.sig.ret,
+                                program.module.symtab.as_deref(),
+                            )?),
                             effects: d.sig.effects.clone(),
                         },
                     );
@@ -318,28 +340,36 @@ fn check_one_module(
                 let mut ctx = CheckCtx {
                     module_name,
                     module,
+                    symtab: program.module.symtab.as_deref(),
                     locals: HashMap::new(),
                     return_type: None,
                     allow_return_magic: false,
                 };
                 let got = check_expr(&mut ctx, &v.expr)?;
-                let expected = ast_type_to_type(&v.ty)?;
+                let expected = ast_type_to_type(&v.ty, program.module.symtab.as_deref())?;
                 expect_type(&expected, &got.ty, v.expr.span())?;
             }
             Decl::Function(f) => {
-                if f.name.name == "main" {
+                if id_text(&f.name, program.module.symtab.as_deref()) == "main" {
                     validate_main_signature(f)?;
                 }
                 let mut ctx = CheckCtx {
                     module_name,
                     module,
+                    symtab: program.module.symtab.as_deref(),
                     locals: HashMap::new(),
-                    return_type: Some(ast_type_to_type(&f.sig.ret)?),
+                    return_type: Some(ast_type_to_type(
+                        &f.sig.ret,
+                        program.module.symtab.as_deref(),
+                    )?),
                     allow_return_magic: false,
                 };
                 for (idx, param_ty) in f.sig.params.iter().enumerate() {
                     let param_name = format!("arg{idx}");
-                    ctx.locals.insert(param_name, ast_type_to_type(param_ty)?);
+                    ctx.locals.insert(
+                        param_name,
+                        ast_type_to_type(param_ty, program.module.symtab.as_deref())?,
+                    );
                 }
                 let got = check_expr(&mut ctx, &f.expr)?;
                 let sig = function_type_to_type(&f.sig)?;
@@ -351,7 +381,7 @@ fn check_one_module(
                             span: f.expr.span(),
                             message: format!(
                                 "function `{}` declared effects {} but body needs {}",
-                                f.name.name,
+                                id_text(&f.name, program.module.symtab.as_deref()),
                                 effect_set_to_string(&effects),
                                 effect_set_to_string(&got.effects)
                             ),
@@ -372,7 +402,7 @@ fn validate_main_signature(f: &crate::ast::FunctionDecl) -> Result<(), TypeError
             message: "`main` must have zero parameters".to_string(),
         });
     }
-    let ret = ast_type_to_type(&f.sig.ret)?;
+    let ret = ast_type_to_type(&f.sig.ret, None)?;
     if ret != Type::I32 {
         return Err(TypeError {
             code: TypeErrorCode::InvalidMainSignature,
@@ -410,25 +440,29 @@ fn check_expr(ctx: &mut CheckCtx<'_>, expr: &Expr) -> Result<ExprCheck, TypeErro
             ty: Type::String,
             effects: EffectSet::default(),
         }),
-        Expr::Name(name) => resolve_name_type(ctx, &name.name, name.span).map(|ty| ExprCheck {
-            ty,
-            effects: EffectSet::default(),
-        }),
+        Expr::Name(name) => {
+            let resolved = id_text(name, ctx.symtab);
+            resolve_name_type(ctx, &resolved, name.span).map(|ty| ExprCheck {
+                ty,
+                effects: EffectSet::default(),
+            })
+        }
         Expr::NameApp { name, args, span } => {
-            if name.name == "Ok" || name.name == "Er" {
+            let name_text = id_text(name, ctx.symtab);
+            if name_text == "Ok" || name_text == "Er" {
                 if args.len() != 1 {
                     return Err(TypeError {
                         code: TypeErrorCode::ArityMismatch,
                         span: *span,
                         message: format!(
                             "constructor `{}` expects 1 args, got {}",
-                            name.name,
+                            name_text,
                             args.len()
                         ),
                     });
                 }
                 let payload = check_expr(ctx, &args[0])?;
-                let ty = if name.name == "Ok" {
+                let ty = if name_text == "Ok" {
                     Type::Result(
                         Box::new(payload.ty.clone()),
                         Box::new(Type::TypeVar("__res_err".to_string())),
@@ -444,7 +478,7 @@ fn check_expr(ctx: &mut CheckCtx<'_>, expr: &Expr) -> Result<ExprCheck, TypeErro
                     effects: payload.effects,
                 });
             }
-            if let Some(ctor) = ctx.module.ctors.get(&name.name) {
+            if let Some(ctor) = ctx.module.ctors.get(&name_text) {
                 let (fields, result_ty) = instantiate_ctor_sig(ctor);
                 if fields.len() != args.len() {
                     return Err(TypeError {
@@ -452,7 +486,7 @@ fn check_expr(ctx: &mut CheckCtx<'_>, expr: &Expr) -> Result<ExprCheck, TypeErro
                         span: *span,
                         message: format!(
                             "constructor `{}` expects {} args, got {}",
-                            name.name,
+                            name_text,
                             fields.len(),
                             args.len()
                         ),
@@ -469,12 +503,13 @@ fn check_expr(ctx: &mut CheckCtx<'_>, expr: &Expr) -> Result<ExprCheck, TypeErro
                     effects,
                 });
             }
-            let callee_ty = resolve_name_type(ctx, &name.name, name.span)?;
+            let callee_ty = resolve_name_type(ctx, &name_text, name.span)?;
             call_type(ctx, callee_ty, args, *span)
         }
         Expr::Call { callee, args, span } => {
             if let Expr::Name(name) = &**callee {
-                if name.name == "==" || name.name == "!=" {
+                let op = id_text(name, ctx.symtab);
+                if op == "==" || op == "!=" {
                     if args.len() != 2 {
                         return Err(TypeError {
                             code: TypeErrorCode::ArityMismatch,
@@ -514,18 +549,19 @@ fn check_expr(ctx: &mut CheckCtx<'_>, expr: &Expr) -> Result<ExprCheck, TypeErro
         } => {
             let value_checked = check_expr(ctx, value)?;
             let bind_ty = if let Some(ann) = ty {
-                let ann_ty = ast_type_to_type(ann)?;
+                let ann_ty = ast_type_to_type(ann, ctx.symtab)?;
                 expect_type(&ann_ty, &value_checked.ty, value.span())?;
                 ann_ty
             } else {
                 value_checked.ty.clone()
             };
-            let prev = ctx.locals.insert(name.name.clone(), bind_ty);
+            let local_name = id_text(name, ctx.symtab);
+            let prev = ctx.locals.insert(local_name.clone(), bind_ty);
             let body_checked = check_expr(ctx, body)?;
             if let Some(old) = prev {
-                ctx.locals.insert(name.name.clone(), old);
+                ctx.locals.insert(local_name.clone(), old);
             } else {
-                ctx.locals.remove(&name.name);
+                ctx.locals.remove(&local_name);
             }
             Ok(ExprCheck {
                 ty: body_checked.ty,
@@ -607,14 +643,16 @@ fn check_expr(ctx: &mut CheckCtx<'_>, expr: &Expr) -> Result<ExprCheck, TypeErro
             let mut nested = ctx.clone();
             let mut param_types = Vec::new();
             for p in params {
-                let ty = ast_type_to_type(&p.ty)?;
-                nested.locals.insert(p.name.name.clone(), ty.clone());
+                let ty = ast_type_to_type(&p.ty, ctx.symtab)?;
+                nested
+                    .locals
+                    .insert(id_text(&p.name, ctx.symtab), ty.clone());
                 param_types.push(ty);
             }
-            nested.return_type = Some(ast_type_to_type(ret)?);
+            nested.return_type = Some(ast_type_to_type(ret, ctx.symtab)?);
             nested.allow_return_magic = false;
             let body_checked = check_expr(&mut nested, body)?;
-            let ret_ty = ast_type_to_type(ret)?;
+            let ret_ty = ast_type_to_type(ret, ctx.symtab)?;
             expect_type(&ret_ty, &body_checked.ty, body.span())?;
             if !effects_is_superset(effects, &body_checked.effects) {
                 return Err(TypeError {
@@ -736,26 +774,28 @@ fn check_pattern(
             Ok(PatternCover::Other)
         }
         Pattern::Name(name) => {
-            if let Some(ctor) = ctx.module.ctors.get(&name.name) {
+            let name_text = id_text(name, ctx.symtab);
+            if let Some(ctor) = ctx.module.ctors.get(&name_text) {
                 if ctor.fields.is_empty() {
                     let (_, ctor_ty) = instantiate_ctor_sig(ctor);
                     expect_type(&ctor_ty, expected, name.span)?;
-                    return Ok(PatternCover::Ctor(name.name.clone()));
+                    return Ok(PatternCover::Ctor(name_text));
                 }
             }
-            ctx.locals.insert(name.name.clone(), expected.clone());
+            ctx.locals.insert(name_text, expected.clone());
             Ok(PatternCover::Other)
         }
         Pattern::Ctor { name, args, span } => {
+            let ctor_name = id_text(name, ctx.symtab);
             if let Type::Result(ok_ty, err_ty) = expected {
-                let field_ty: &Type = match name.name.as_str() {
+                let field_ty: &Type = match ctor_name.as_str() {
                     "Ok" => ok_ty,
                     "Er" => err_ty,
                     _ => {
                         return Err(TypeError {
                             code: TypeErrorCode::InvalidPattern,
                             span: name.span,
-                            message: format!("unknown constructor `{}`", name.name),
+                            message: format!("unknown constructor `{}`", ctor_name),
                         });
                     }
                 };
@@ -765,18 +805,18 @@ fn check_pattern(
                         span: *span,
                         message: format!(
                             "constructor `{}` pattern expects 1 args, got {}",
-                            name.name,
+                            ctor_name,
                             args.len()
                         ),
                     });
                 }
                 check_pattern(ctx, &args[0], field_ty)?;
-                return Ok(PatternCover::Ctor(name.name.clone()));
+                return Ok(PatternCover::Ctor(ctor_name));
             }
-            let ctor = ctx.module.ctors.get(&name.name).ok_or_else(|| TypeError {
+            let ctor = ctx.module.ctors.get(&ctor_name).ok_or_else(|| TypeError {
                 code: TypeErrorCode::InvalidPattern,
                 span: name.span,
-                message: format!("unknown constructor `{}`", name.name),
+                message: format!("unknown constructor `{}`", ctor_name),
             })?;
             let (fields, ctor_ty) = instantiate_ctor_sig(ctor);
             expect_type(&ctor_ty, expected, *span)?;
@@ -786,7 +826,7 @@ fn check_pattern(
                     span: *span,
                     message: format!(
                         "constructor `{}` pattern expects {} args, got {}",
-                        name.name,
+                        ctor_name,
                         fields.len(),
                         args.len()
                     ),
@@ -795,7 +835,7 @@ fn check_pattern(
             for (arg, field_ty) in args.iter().zip(fields.iter()) {
                 check_pattern(ctx, arg, field_ty)?;
             }
-            Ok(PatternCover::Ctor(name.name.clone()))
+            Ok(PatternCover::Ctor(ctor_name))
         }
         Pattern::Tuple { items, span } => {
             let Type::Tuple(expected_items) = expected else {
@@ -898,9 +938,9 @@ fn function_type_to_type(sig: &FunctionType) -> Result<Type, TypeError> {
         params: sig
             .params
             .iter()
-            .map(ast_type_to_type)
+            .map(|t| ast_type_to_type(t, None))
             .collect::<Result<_, _>>()?,
-        ret: Box::new(ast_type_to_type(&sig.ret)?),
+        ret: Box::new(ast_type_to_type(&sig.ret, None)?),
         effects: sig.effects.clone(),
     })
 }
@@ -913,7 +953,7 @@ fn instantiate_ctor_sig(sig: &CtorSig) -> (Vec<Type>, Type) {
     let fields = sig
         .fields
         .iter()
-        .map(|field| ast_type_to_type_with_vars(field, &map))
+        .map(|field| ast_type_to_type_with_vars(field, &map, sig.symtab.as_deref()))
         .collect::<Vec<_>>();
     let params = sig
         .type_params
@@ -944,11 +984,15 @@ fn adt_constructor_names(ctx: &CheckCtx<'_>, ty: &Type) -> Option<BTreeSet<Strin
     }
 }
 
-fn ast_type_to_type(ty: &TypeExpr) -> Result<Type, TypeError> {
-    Ok(ast_type_to_type_with_vars(ty, &HashMap::new()))
+fn ast_type_to_type(ty: &TypeExpr, symtab: Option<&[String]>) -> Result<Type, TypeError> {
+    Ok(ast_type_to_type_with_vars(ty, &HashMap::new(), symtab))
 }
 
-fn ast_type_to_type_with_vars(ty: &TypeExpr, vars: &HashMap<String, Type>) -> Type {
+fn ast_type_to_type_with_vars(
+    ty: &TypeExpr,
+    vars: &HashMap<String, Type>,
+    symtab: Option<&[String]>,
+) -> Type {
     match ty {
         TypeExpr::Prim(prim, _) => match prim {
             PrimType::Bool => Type::Bool,
@@ -962,48 +1006,49 @@ fn ast_type_to_type_with_vars(ty: &TypeExpr, vars: &HashMap<String, Type>) -> Ty
             PrimType::Unit => Type::Unit,
         },
         TypeExpr::Named { name, args, .. } => {
+            let resolved_name = name.resolved_string(symtab);
             if args.is_empty() {
-                if let Some(v) = vars.get(&name.name) {
+                if let Some(v) = vars.get(&resolved_name) {
                     return v.clone();
                 }
             }
             Type::Named(
-                name.name.clone(),
+                resolved_name,
                 args.iter()
-                    .map(|a| ast_type_to_type_with_vars(a, vars))
+                    .map(|a| ast_type_to_type_with_vars(a, vars, symtab))
                     .collect(),
             )
         }
         TypeExpr::Optional { inner, .. } => {
-            Type::Optional(Box::new(ast_type_to_type_with_vars(inner, vars)))
+            Type::Optional(Box::new(ast_type_to_type_with_vars(inner, vars, symtab)))
         }
         TypeExpr::Array { inner, .. } => {
-            Type::Array(Box::new(ast_type_to_type_with_vars(inner, vars)))
+            Type::Array(Box::new(ast_type_to_type_with_vars(inner, vars, symtab)))
         }
         TypeExpr::Map { key, value, .. } => Type::Map(
-            Box::new(ast_type_to_type_with_vars(key, vars)),
-            Box::new(ast_type_to_type_with_vars(value, vars)),
+            Box::new(ast_type_to_type_with_vars(key, vars, symtab)),
+            Box::new(ast_type_to_type_with_vars(value, vars, symtab)),
         ),
         TypeExpr::Tuple { items, .. } => Type::Tuple(
             items
                 .iter()
-                .map(|i| ast_type_to_type_with_vars(i, vars))
+                .map(|i| ast_type_to_type_with_vars(i, vars, symtab))
                 .collect(),
         ),
         TypeExpr::Function { sig, .. } => Type::Function {
             params: sig
                 .params
                 .iter()
-                .map(|p| ast_type_to_type_with_vars(p, vars))
+                .map(|p| ast_type_to_type_with_vars(p, vars, symtab))
                 .collect(),
-            ret: Box::new(ast_type_to_type_with_vars(&sig.ret, vars)),
+            ret: Box::new(ast_type_to_type_with_vars(&sig.ret, vars, symtab)),
             effects: sig.effects.clone(),
         },
         TypeExpr::ResultSugar { ok, err, .. } => Type::Result(
-            Box::new(ast_type_to_type_with_vars(ok, vars)),
-            Box::new(ast_type_to_type_with_vars(err, vars)),
+            Box::new(ast_type_to_type_with_vars(ok, vars, symtab)),
+            Box::new(ast_type_to_type_with_vars(err, vars, symtab)),
         ),
-        TypeExpr::Group { inner, .. } => ast_type_to_type_with_vars(inner, vars),
+        TypeExpr::Group { inner, .. } => ast_type_to_type_with_vars(inner, vars, symtab),
     }
 }
 

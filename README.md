@@ -1,14 +1,32 @@
-# muScript v0.1
+# muScript v0.2
 
 ![CI](https://img.shields.io/badge/ci-fast%20checks-blue)
 ![Fuzz (manual)](https://img.shields.io/badge/fuzz-manual-orange)
 
-`muc` is the reference µScript v0.1 toolchain in Rust.
+`muc` is the reference µScript v0.2 toolchain in Rust.
 It includes:
 - Lexer + parser for the EBNF grammar
-- Canonical formatter (`mufmt` behavior via `muc fmt`)
+- Canonical formatter (`mufmt` behavior via `muc fmt`) with readable/compressed modes
 - Module loading + name resolution + type/effect checking
 - Stack bytecode (`.mub`, header `MUB1`) + VM runtime
+
+## Why v0.2 (Agent + Cost Focus)
+
+µScript is designed by and for agents:
+- Small, regular grammar and canonical formatting reduce parsing ambiguity.
+- Fewer equivalent spellings means less prompt context spent on style negotiation.
+- Deterministic output (`fmt`) makes agent loops stable (plan -> edit -> check -> diff).
+- Explicit effects and static checks reduce trial-and-error execution.
+
+v0.2 adds a compressed canonical form optimized for token economy:
+- Module symbol table + numeric symbol refs (`$[...]`, `#n`) reduce repeated-name overhead.
+- S-expression calls and bracket special forms reduce punctuation noise.
+- Optional single-letter effect atoms in compressed mode (`I,F,N,P,R,T,S`).
+
+Practical impact:
+- Fewer source tokens usually means lower LLM prompt/completion cost for code-gen and review loops.
+- Savings are strongest when identifiers repeat frequently across modules/functions.
+- The repo includes token-efficiency regression tests (`tests/token_efficiency.rs`).
 
 ## Quickstart
 
@@ -18,10 +36,12 @@ It includes:
 cargo build
 ```
 
-2. Canonical format gate:
+2. Canonical format gates:
 
 ```bash
-cargo run -- fmt --check .
+cargo run -- fmt --check examples
+cargo run -- fmt --check tests/fixtures/parser
+cargo run -- fmt --mode=compressed --check tests/fixtures/compressed
 ```
 
 3. Type + effect check:
@@ -89,7 +109,7 @@ cargo +nightly fuzz run fuzz_vm_step -- -max_total_time=30
 
 ## CLI
 
-- `muc fmt <file|dir> [--check]`
+- `muc fmt <file|dir> [--mode=readable|compressed] [--check]`
 - `muc check <file|dir>`
 - `muc run <file.mu|file.mub> [-- args...]`
 - `muc build <file.mu> -o out.mub`
@@ -99,12 +119,35 @@ Example modules:
 - `examples/json.mu`
 - `examples/http.mu`
 
+### Compressed Canonical Conversion
+
+Convert a project/dir to compressed canonical form:
+
+```bash
+cargo run -- fmt --mode=compressed <file-or-dir>
+```
+
+Verify compressed canonical form:
+
+```bash
+cargo run -- fmt --mode=compressed --check <file-or-dir>
+```
+
+Convert back to readable canonical form:
+
+```bash
+cargo run -- fmt --mode=readable <file-or-dir>
+```
+
+Readable and compressed forms are syntax variants of the same semantics.
+
 ## CI Gates
 
 CI enforces:
 - `cargo fmt --all -- --check`
 - `cargo test`
-- `cargo run -- fmt --check .`
+- readable fixture format checks
+- compressed fixture format checks
 
 Manual workflow:
 - `fuzz` workflow dispatch runs each fuzz target for a short smoke duration

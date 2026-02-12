@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 
-use crate::ast::{Decl, Expr, FunctionDecl, Literal, Param, Pattern, Program, ValueDecl};
+use crate::ast::{Decl, Expr, FunctionDecl, Ident, Literal, Param, Pattern, Program, ValueDecl};
 
 pub const MAGIC: &[u8; 4] = b"MUB1";
 
@@ -145,6 +145,7 @@ struct CompileCtx {
     fn_ids: HashMap<String, u32>,
     value_ids: HashMap<String, u32>,
     functions: Vec<FunctionBytecode>,
+    symtab: Option<Vec<String>>,
 }
 
 struct Lowerer<'a> {
@@ -152,6 +153,10 @@ struct Lowerer<'a> {
     code: Vec<u8>,
     locals: BTreeMap<String, u32>,
     next_local: u32,
+}
+
+fn id_text(id: &Ident, symtab: Option<&[String]>) -> String {
+    id.resolved_string(symtab)
 }
 
 pub fn compile(program: &Program) -> Result<Vec<u8>, BytecodeError> {
@@ -172,16 +177,19 @@ pub fn compile(program: &Program) -> Result<Vec<u8>, BytecodeError> {
 
     let mut ctx = CompileCtx {
         ctor_names: collect_ctors(program),
+        symtab: program.module.symtab.clone(),
         ..CompileCtx::default()
     };
 
     let mut next_id = 0u32;
     for v in &top_values {
-        ctx.value_ids.insert(v.name.name.clone(), next_id);
+        ctx.value_ids
+            .insert(id_text(&v.name, ctx.symtab.as_deref()), next_id);
         next_id += 1;
     }
     for f in &top_functions {
-        ctx.fn_ids.insert(f.name.name.clone(), next_id);
+        ctx.fn_ids
+            .insert(id_text(&f.name, ctx.symtab.as_deref()), next_id);
         next_id += 1;
     }
     let top_len = top_values.len() + top_functions.len();
@@ -267,16 +275,17 @@ impl<'a> Lowerer<'a> {
             }
             Expr::Unit(_) => self.code.push(OpCode::PushUnit as u8),
             Expr::Name(id) => {
-                if let Some(slot) = self.locals.get(&id.name) {
+                let resolved = id_text(id, self.ctx.symtab.as_deref());
+                if let Some(slot) = self.locals.get(&resolved) {
                     self.code.push(OpCode::LoadLocal as u8);
                     self.code.extend_from_slice(&slot.to_le_bytes());
-                } else if let Some(value_id) = self.ctx.value_ids.get(&id.name).copied() {
+                } else if let Some(value_id) = self.ctx.value_ids.get(&resolved).copied() {
                     self.code.push(OpCode::CallFn as u8);
                     self.code.extend_from_slice(&value_id.to_le_bytes());
                     self.code.push(0);
                 } else {
                     return Err(BytecodeError {
-                        message: format!("unsupported unresolved name `{}` in lowering", id.name),
+                        message: format!("unsupported unresolved name `{resolved}` in lowering"),
                     });
                 }
             }
@@ -287,9 +296,10 @@ impl<'a> Lowerer<'a> {
                 let slot = self.alloc_local();
                 self.code.push(OpCode::StoreLocal as u8);
                 self.code.extend_from_slice(&slot.to_le_bytes());
-                let prev = self.locals.insert(name.name.clone(), slot);
+                let resolved = id_text(name, self.ctx.symtab.as_deref());
+                let prev = self.locals.insert(resolved.clone(), slot);
                 self.lower_expr(body)?;
-                restore_local(&mut self.locals, &name.name, prev);
+                restore_local(&mut self.locals, &resolved, prev);
             }
             Expr::Block { prefix, tail, .. } => {
                 for e in prefix {
@@ -320,7 +330,8 @@ impl<'a> Lowerer<'a> {
             }
             Expr::Call { callee, args, .. } => {
                 if let Expr::Name(name) = &**callee {
-                    if let Some(builtin_id) = builtin_id(&name.name) {
+                    let resolved = id_text(name, self.ctx.symtab.as_deref());
+                    if let Some(builtin_id) = builtin_id(&resolved) {
                         for arg in args {
                             self.lower_expr(arg)?;
                         }
@@ -329,7 +340,7 @@ impl<'a> Lowerer<'a> {
                         self.code.push(args.len() as u8);
                         return Ok(());
                     }
-                    if let Some(fn_id) = self.ctx.fn_ids.get(&name.name).copied() {
+                    if let Some(fn_id) = self.ctx.fn_ids.get(&resolved).copied() {
                         for arg in args {
                             self.lower_expr(arg)?;
                         }
@@ -338,7 +349,7 @@ impl<'a> Lowerer<'a> {
                         self.code.push(args.len() as u8);
                         return Ok(());
                     }
-                    if let Some(slot) = self.locals.get(&name.name).copied() {
+                    if let Some(slot) = self.locals.get(&resolved).copied() {
                         self.code.push(OpCode::LoadLocal as u8);
                         self.code.extend_from_slice(&slot.to_le_bytes());
                         for arg in args {
@@ -358,7 +369,7 @@ impl<'a> Lowerer<'a> {
                 self.code.push(args.len() as u8);
             }
             Expr::Lambda { params, body, .. } => {
-                let captures = capture_plan(&self.locals, params);
+                let captures = capture_plan(&self.locals, params, self.ctx.symtab.as_deref());
                 let lambda_id = self.compile_lambda(params, body, &captures)?;
                 for cap in &captures {
                     let slot = self.locals.get(cap).ok_or_else(|| BytecodeError {
@@ -408,7 +419,8 @@ impl<'a> Lowerer<'a> {
                             }
                         }
                         Pattern::Ctor { name, args, .. } => {
-                            let tag_id = self.intern_string(&name.name);
+                            let ctor_name = id_text(name, self.ctx.symtab.as_deref());
+                            let tag_id = self.intern_string(&ctor_name);
                             self.code.push(OpCode::LoadLocal as u8);
                             self.code.extend_from_slice(&scrut_slot.to_le_bytes());
                             let arm_patch = self.emit_jump_if_tag_placeholder(tag_id);
@@ -425,8 +437,9 @@ impl<'a> Lowerer<'a> {
                                         let slot = self.alloc_local();
                                         self.code.push(OpCode::StoreLocal as u8);
                                         self.code.extend_from_slice(&slot.to_le_bytes());
-                                        let prev = self.locals.insert(id.name.clone(), slot);
-                                        bound.push((id.name.clone(), prev));
+                                        let bind_name = id_text(id, self.ctx.symtab.as_deref());
+                                        let prev = self.locals.insert(bind_name.clone(), slot);
+                                        bound.push((bind_name, prev));
                                     }
                                     Pattern::Wildcard(_) => {}
                                     _ => {
@@ -447,8 +460,9 @@ impl<'a> Lowerer<'a> {
                             self.patch_jump_to_current(next_patch);
                         }
                         Pattern::Name(id) => {
-                            if self.ctx.ctor_names.contains(&id.name) {
-                                let tag_id = self.intern_string(&id.name);
+                            let name_text = id_text(id, self.ctx.symtab.as_deref());
+                            if self.ctx.ctor_names.contains(&name_text) {
+                                let tag_id = self.intern_string(&name_text);
                                 self.code.push(OpCode::LoadLocal as u8);
                                 self.code.extend_from_slice(&scrut_slot.to_le_bytes());
                                 let arm_patch = self.emit_jump_if_tag_placeholder(tag_id);
@@ -465,9 +479,9 @@ impl<'a> Lowerer<'a> {
                                 let slot = self.alloc_local();
                                 self.code.push(OpCode::StoreLocal as u8);
                                 self.code.extend_from_slice(&slot.to_le_bytes());
-                                let prev = self.locals.insert(id.name.clone(), slot);
+                                let prev = self.locals.insert(name_text.clone(), slot);
                                 self.lower_expr(&arm.expr)?;
-                                restore_local(&mut self.locals, &id.name, prev);
+                                restore_local(&mut self.locals, &name_text, prev);
                                 let end_patch = self.emit_jump_placeholder(OpCode::Jump);
                                 end_jumps.push(end_patch);
                             }
@@ -515,18 +529,19 @@ impl<'a> Lowerer<'a> {
                 self.code.extend_from_slice(&msg_id.to_le_bytes());
             }
             Expr::NameApp { name, args, .. } => {
-                if !self.ctx.ctor_names.contains(&name.name) {
+                let ctor_name = id_text(name, self.ctx.symtab.as_deref());
+                if !self.ctx.ctor_names.contains(&ctor_name) {
                     return Err(BytecodeError {
                         message: format!(
                             "name application `{}` is not a known constructor in this module",
-                            name.name
+                            ctor_name
                         ),
                     });
                 }
                 for arg in args {
                     self.lower_expr(arg)?;
                 }
-                let tag_id = self.intern_string(&name.name);
+                let tag_id = self.intern_string(&ctor_name);
                 self.code.push(OpCode::MkAdt as u8);
                 self.code.extend_from_slice(&tag_id.to_le_bytes());
                 self.code.push(args.len() as u8);
@@ -549,7 +564,7 @@ impl<'a> Lowerer<'a> {
             slot += 1;
         }
         for p in params {
-            locals.insert(p.name.name.clone(), slot);
+            locals.insert(id_text(&p.name, self.ctx.symtab.as_deref()), slot);
             slot += 1;
         }
         let mut nested = Lowerer {
@@ -613,14 +628,18 @@ fn restore_local(locals: &mut BTreeMap<String, u32>, name: &str, prev: Option<u3
     }
 }
 
-fn capture_plan(locals: &BTreeMap<String, u32>, params: &[Param]) -> Vec<String> {
+fn capture_plan(
+    locals: &BTreeMap<String, u32>,
+    params: &[Param],
+    symtab: Option<&[String]>,
+) -> Vec<String> {
     let param_names = params
         .iter()
-        .map(|p| p.name.name.as_str())
+        .map(|p| p.name.resolved_string(symtab))
         .collect::<HashSet<_>>();
     locals
         .keys()
-        .filter(|name| !param_names.contains(name.as_str()))
+        .filter(|name| !param_names.contains(*name))
         .cloned()
         .collect()
 }
@@ -632,7 +651,7 @@ fn collect_ctors(program: &Program) -> HashSet<String> {
     for decl in &program.module.decls {
         if let Decl::Type(td) = decl {
             for ctor in &td.ctors {
-                set.insert(ctor.name.name.clone());
+                set.insert(id_text(&ctor.name, program.module.symtab.as_deref()));
             }
         }
     }

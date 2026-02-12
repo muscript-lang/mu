@@ -174,3 +174,95 @@ Parse into an AST that preserves ambiguous forms (Name, NameApp).
 Resolve names using the module’s symbol tables (types/ctors/values) during type checking.
 Enforce canonicalization separately:
 Build an AST printer that prints tokens exactly according to the canonical rules.
+
+---
+
+v0.2 additions (backward-compatible)
+
+7. Symbol names and module symbol table
+
+symref      = "#" , int_lit ;
+symname     = ident | symref ;
+
+symtab_decl = "$" , "[" , [ ident_list ] , "]" , ";" ;
+
+module      = "@" , modid , "{" , [ symtab_decl ] , { decl } , "}" ;
+
+Notes:
+- `symref` is valid in positions that accept identifiers in v0.1 syntax.
+- If any `symref` is used, a `symtab_decl` must be present in the same module.
+
+8. Declaration updates for symbol names
+
+import_decl = ":" , symname , "=" , modid , ";" ;
+
+export_decl = "E" , "[" , [ symname_list ] , "]" , ";" ;
+symname_list = symname , { "," , symname } ;
+
+type_decl   = "T" , symname , [ symname_type_params ] , "=" , ctor , { "|" , ctor } , ";" ;
+symname_type_params = "[" , symname_list , "]" ;
+ctor        = symname , [ "(" , [ type_list ] , ")" ] ;
+
+val_decl    = "V" , symname , ":" , type , "=" , expr , ";" ;
+
+fun_decl    = "F" , symname , [ symname_type_params ] , ":" , fun_type , "=" , expr , ";" ;
+
+param       = symname , ":" , type ;
+
+named_type  = symname , [ type_args ] ;
+
+9. Effect atoms (long + compressed aliases)
+
+effect_set  = "!{" , effect_atom , { "," , effect_atom } , "}" ;
+
+effect_atom = "io" | "fs" | "net" | "proc" | "rand" | "time" | "st"
+            | "I"  | "F"  | "N"   | "P"    | "R"    | "T"    | "S" ;
+
+10. New expression forms
+
+expr        = block
+            | unit_expr
+            | let_expr
+            | if_expr
+            | match_expr
+            | call_expr
+            | sexpr_call
+            | lambda_expr
+            | bracket_let_expr
+            | bracket_if_expr
+            | bracket_match_expr
+            | bracket_lambda_expr
+            | assert_expr
+            | require_expr
+            | ensure_expr
+            | literal
+            | symname
+            | ctor_expr
+            | paren_expr
+            ;
+
+sexpr_call  = "(" , expr , expr , { expr } , ")" ;
+Disambiguation:
+- `()` is `unit_expr`
+- `(e)` is `paren_expr`
+- `(e e2 ...)` is `sexpr_call`
+
+bracket_let_expr
+            = "[" , "v" , symname , expr , expr , "]" ;
+
+bracket_if_expr
+            = "[" , "i" , expr , expr , expr , "]" ;
+
+bracket_match_expr
+            = "[" , "m" , expr , bracket_match_arm , { bracket_match_arm } , "]" ;
+
+bracket_match_arm
+            = "{" , pattern , expr , "}" ;
+
+bracket_lambda_expr
+            = "[" , "l" , "(" , params , ")" , ":" , type , [ effect_set ] , expr , "]" ;
+
+11. Pattern updates
+
+ident_pat   = symname ;
+ctor_pat    = symname , [ "(" , [ pat_list ] , ")" ] ;
