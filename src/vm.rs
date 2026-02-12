@@ -1,5 +1,6 @@
 use std::fmt;
 use std::io::Read;
+use std::collections::BTreeMap;
 
 use crate::bytecode::{MAGIC, OpCode};
 
@@ -15,6 +16,8 @@ enum Value {
     Int(i64),
     Bool(bool),
     String(String),
+    Array(Vec<Value>),
+    Map(BTreeMap<String, Value>),
     Adt { tag: String, fields: Vec<Value> },
     Closure { fn_id: u32, captures: Vec<Value> },
     Unit,
@@ -547,10 +550,7 @@ fn call_builtin(id: u8, args: &[Value]) -> Result<Value, VmError> {
                 });
             };
             match serde_json::from_str::<serde_json::Value>(text) {
-                Ok(v) => match serde_json::to_string(&v) {
-                    Ok(normalized) => Ok(ok_value(Value::String(normalized))),
-                    Err(e) => Ok(err_value(format!("json stringify failed: {e}"))),
-                },
+                Ok(v) => Ok(ok_value(json_to_value(v))),
                 Err(e) => Ok(err_value(format!("json parse failed: {e}"))),
             }
         }
@@ -560,12 +560,21 @@ fn call_builtin(id: u8, args: &[Value]) -> Result<Value, VmError> {
                     message: "stringify expects one argument".to_string(),
                 });
             }
+            if let Some(v) = value_to_json(&args[0]) {
+                return serde_json::to_string(&v)
+                    .map(Value::String)
+                    .map_err(|e| VmError {
+                        message: format!("json stringify failed: {e}"),
+                    });
+            }
             match &args[0] {
                 Value::String(s) => Ok(Value::String(s.clone())),
                 Value::Adt { tag, fields } => Ok(Value::String(format!("{tag}({})", fields.len()))),
                 Value::Closure { .. } => Ok(Value::String("<closure>".to_string())),
                 Value::Int(v) => Ok(Value::String(v.to_string())),
                 Value::Bool(v) => Ok(Value::String(v.to_string())),
+                Value::Array(items) => Ok(Value::String(format!("<array:{}>", items.len()))),
+                Value::Map(entries) => Ok(Value::String(format!("<map:{}>", entries.len()))),
                 Value::Unit => Ok(Value::String("()".to_string())),
             }
         }
@@ -794,6 +803,83 @@ fn err_value(message: String) -> Value {
     Value::Adt {
         tag: "Er".to_string(),
         fields: vec![Value::String(message)],
+    }
+}
+
+fn json_to_value(v: serde_json::Value) -> Value {
+    match v {
+        serde_json::Value::Null => Value::Adt {
+            tag: "Null".to_string(),
+            fields: Vec::new(),
+        },
+        serde_json::Value::Bool(b) => Value::Adt {
+            tag: "Bool".to_string(),
+            fields: vec![Value::Bool(b)],
+        },
+        serde_json::Value::Number(n) => Value::Adt {
+            tag: "Num".to_string(),
+            fields: vec![Value::String(n.to_string())],
+        },
+        serde_json::Value::String(s) => Value::Adt {
+            tag: "Str".to_string(),
+            fields: vec![Value::String(s)],
+        },
+        serde_json::Value::Array(items) => Value::Adt {
+            tag: "Arr".to_string(),
+            fields: vec![Value::Array(items.into_iter().map(json_to_value).collect())],
+        },
+        serde_json::Value::Object(entries) => {
+            let mut out = BTreeMap::new();
+            for (k, v) in entries {
+                out.insert(k, json_to_value(v));
+            }
+            Value::Adt {
+                tag: "Obj".to_string(),
+                fields: vec![Value::Map(out)],
+            }
+        }
+    }
+}
+
+fn value_to_json(v: &Value) -> Option<serde_json::Value> {
+    match v {
+        Value::Adt { tag, fields } if tag == "Null" && fields.is_empty() => Some(serde_json::Value::Null),
+        Value::Adt { tag, fields } if tag == "Bool" && fields.len() == 1 => match &fields[0] {
+            Value::Bool(b) => Some(serde_json::Value::Bool(*b)),
+            _ => None,
+        },
+        Value::Adt { tag, fields } if tag == "Num" && fields.len() == 1 => match &fields[0] {
+            Value::String(s) => serde_json::from_str::<serde_json::Number>(s)
+                .ok()
+                .map(serde_json::Value::Number),
+            Value::Int(i) => Some(serde_json::Value::Number(serde_json::Number::from(*i))),
+            _ => None,
+        },
+        Value::Adt { tag, fields } if tag == "Str" && fields.len() == 1 => match &fields[0] {
+            Value::String(s) => Some(serde_json::Value::String(s.clone())),
+            _ => None,
+        },
+        Value::Adt { tag, fields } if tag == "Arr" && fields.len() == 1 => match &fields[0] {
+            Value::Array(items) => {
+                let mut out = Vec::with_capacity(items.len());
+                for item in items {
+                    out.push(value_to_json(item)?);
+                }
+                Some(serde_json::Value::Array(out))
+            }
+            _ => None,
+        },
+        Value::Adt { tag, fields } if tag == "Obj" && fields.len() == 1 => match &fields[0] {
+            Value::Map(entries) => {
+                let mut out = serde_json::Map::with_capacity(entries.len());
+                for (k, v) in entries {
+                    out.insert(k.clone(), value_to_json(v)?);
+                }
+                Some(serde_json::Value::Object(out))
+            }
+            _ => None,
+        },
+        _ => None,
     }
 }
 

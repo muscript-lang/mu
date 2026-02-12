@@ -196,3 +196,11 @@ fn bytecode_runs_string_helpers() {
     let bc = compile(&program).expect("program should lower to bytecode");
     run_bytecode(&bc, &[]).expect("str_cat and len builtins should run");
 }
+
+#[test]
+fn bytecode_json_parse_returns_json_adt_for_matching() {
+    let src = "@x.json2{T Res[A,B]=Ok(A)|Er(B);T Json=Null|Bool(b)|Num(f64)|Str(s)|Arr(Json[])|Obj({s:Json});F main:()->i32=m(c(parse,\"{\\\"a\\\":1}\")){Ok(j)=>m(j){Obj(_)=>0;_=>1;};Er(_)=>1;};}";
+    let program = parse_str(src).expect("program should parse");
+    let bc = compile(&program).expect("program should lower to bytecode");
+    run_bytecode(&bc, &[]).expect("parsed JSON object should match Obj constructor");
+}
