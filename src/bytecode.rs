@@ -40,6 +40,7 @@ pub enum OpCode {
     CallFn = 17,
     MkClosure = 18,
     CallClosure = 19,
+    Trap = 20,
 }
 
 #[derive(Debug, Clone)]
@@ -286,9 +287,11 @@ impl<'a> Lowerer<'a> {
                 self.code.push(OpCode::StoreLocal as u8);
                 self.code.extend_from_slice(&scrut_slot.to_le_bytes());
                 let mut end_jumps = Vec::new();
+                let mut has_fallback = false;
                 for arm in arms {
                     match &arm.pattern {
                         Pattern::Wildcard(_) => {
+                            has_fallback = true;
                             self.lower_expr(&arm.expr)?;
                             let end_patch = self.emit_jump_placeholder(OpCode::Jump);
                             end_jumps.push(end_patch);
@@ -364,6 +367,7 @@ impl<'a> Lowerer<'a> {
                                 end_jumps.push(end_patch);
                                 self.patch_jump_to_current(next_patch);
                             } else {
+                                has_fallback = true;
                                 self.code.push(OpCode::LoadLocal as u8);
                                 self.code.extend_from_slice(&scrut_slot.to_le_bytes());
                                 let slot = self.alloc_local();
@@ -384,6 +388,11 @@ impl<'a> Lowerer<'a> {
                             });
                         }
                     }
+                }
+                if !has_fallback {
+                    let msg_id = self.intern_string("E4005: invalid match");
+                    self.code.push(OpCode::Trap as u8);
+                    self.code.extend_from_slice(&msg_id.to_le_bytes());
                 }
                 for patch in end_jumps {
                     self.patch_jump_to_current(patch);

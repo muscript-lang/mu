@@ -162,3 +162,12 @@ fn bytecode_runs_boolean_operator_calls() {
     let bc = compile(&program).expect("program should lower to bytecode");
     run_bytecode(&bc, &[]).expect("boolean operators should run");
 }
+
+#[test]
+fn bytecode_traps_on_invalid_match() {
+    let src = "@x.badm{F main:()->i32=m(t){f=>0;};}";
+    let program = parse_str(src).expect("program should parse");
+    let bc = compile(&program).expect("program should lower to bytecode");
+    let err = run_bytecode(&bc, &[]).expect_err("invalid match should trap");
+    assert!(err.to_string().contains("E4005"));
+}

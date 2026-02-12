@@ -237,6 +237,15 @@ pub fn run_bytecode(bytecode: &[u8], _args: &[String]) -> Result<(), VmError> {
                     locals,
                 });
             }
+            x if x == OpCode::Trap as u8 => {
+                let msg_idx = read_u32(code, &mut frame.ip)? as usize;
+                let msg = strings.get(msg_idx).ok_or_else(|| VmError {
+                    message: "trap message index out of bounds".to_string(),
+                })?;
+                return Err(VmError {
+                    message: msg.clone(),
+                });
+            }
             x if x == OpCode::MkAdt as u8 => {
                 let tag_idx = read_u32(code, &mut frame.ip)? as usize;
                 let argc = read_u8(code, &mut frame.ip)? as usize;
