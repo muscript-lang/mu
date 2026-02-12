@@ -589,13 +589,18 @@ fn call_builtin(id: u8, args: &[Value]) -> Result<Value, VmError> {
                     message: "run expects a string command".to_string(),
                 });
             };
-            let Value::String(arg_text) = &args[1] else {
+            let Value::Array(arg_values) = &args[1] else {
                 return Err(VmError {
-                    message: "run expects second argument as string (space-separated args)".to_string(),
+                    message: "run expects second argument as string array".to_string(),
                 });
             };
             let mut child = std::process::Command::new(cmd);
-            for arg in arg_text.split_whitespace() {
+            for arg in arg_values {
+                let Value::String(arg) = arg else {
+                    return Err(VmError {
+                        message: "run expects second argument as string array".to_string(),
+                    });
+                };
                 child.arg(arg);
             }
             match child.status() {
@@ -928,4 +933,32 @@ fn read_i64(bytes: &[u8], cursor: &mut usize) -> Result<i64, VmError> {
 
 fn with_code(code: &str, message: &str) -> String {
     format!("{code}: {message}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Value, call_builtin};
+
+    #[test]
+    fn proc_run_builtin_rejects_non_array_args() {
+        let err = call_builtin(8, &[Value::String("echo".to_string()), Value::String("x".to_string())])
+            .expect_err("run should reject non-array second argument");
+        assert!(
+            err.to_string().contains("run expects second argument as string array"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn proc_run_builtin_accepts_string_array_args() {
+        let value = call_builtin(
+            8,
+            &[
+                Value::String("echo".to_string()),
+                Value::Array(vec![Value::String("ok".to_string())]),
+            ],
+        )
+        .expect("run should accept string array");
+        assert!(matches!(value, Value::Adt { tag, .. } if tag == "Ok"));
+    }
 }
