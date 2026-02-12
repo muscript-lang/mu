@@ -99,6 +99,21 @@ fn run_command_executes_program() {
 }
 
 #[test]
+fn run_command_executes_json_example() {
+    let exe = env!("CARGO_BIN_EXE_muc");
+    let output = Command::new(exe)
+        .args(["run", "examples/json.mu"])
+        .output()
+        .expect("binary should run");
+
+    assert!(
+        output.status.success(),
+        "run should succeed for json example: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn run_command_executes_built_mub() {
     let exe = env!("CARGO_BIN_EXE_muc");
     let out = unique_temp_mub_file("hello_run");
