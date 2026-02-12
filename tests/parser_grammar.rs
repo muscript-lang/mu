@@ -47,3 +47,14 @@ fn allows_t_and_f_as_identifiers_outside_literal_positions() {
     let formatted = format_program(&program);
     assert!(formatted.starts_with("@t.m{"));
 }
+
+#[test]
+fn preserves_array_suffix_in_type_arguments() {
+    let src = "@m.arr{T Json=Null|Arr(Json[]);}";
+    let program = parse_str(src).expect("program should parse");
+    let formatted = format_program(&program);
+    assert!(
+        formatted.contains("Arr(Json[])"),
+        "array suffix should be preserved in canonical formatting: {formatted}"
+    );
+}

@@ -494,11 +494,9 @@ impl Parser {
         }
         let mut args = Vec::new();
         let mut span = name.span;
-        if self.at_simple(TokenKind::LBracket) {
+        if self.at_simple(TokenKind::LBracket) && !self.lookahead_is_simple(1, TokenKind::RBracket) {
             self.bump();
-            if !self.at_simple(TokenKind::RBracket) {
-                args = self.parse_type_list()?;
-            }
+            args = self.parse_type_list()?;
             let close = self.expect_simple(TokenKind::RBracket, "expected `]` in type args")?;
             span = span.merge(close.span);
         }
