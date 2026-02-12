@@ -33,6 +33,12 @@ cargo run -- check examples
 cargo run -- run examples/hello.mu
 ```
 
+You can also run the JSON roundtrip example:
+
+```bash
+cargo run -- run examples/json.mu
+```
+
 5. Build bytecode:
 
 ```bash
@@ -57,3 +63,8 @@ cargo test
 - `muc check <file|dir>`
 - `muc run <file.mu|file.mub> [-- args...]`
 - `muc build <file.mu> -o out.mub`
+
+Example modules:
+- `examples/hello.mu`
+- `examples/json.mu`
+- `examples/http.mu`
