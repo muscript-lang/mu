@@ -109,11 +109,12 @@ fn format_decl(decl: &Decl, out: &mut String) {
 }
 
 fn format_effect_set(effects: &EffectSet, out: &mut String) {
-    if effects.atoms.is_empty() {
+    let atoms = canonical_effect_atoms(effects);
+    if atoms.is_empty() {
         return;
     }
     out.push_str("!{");
-    for (i, atom) in effects.atoms.iter().enumerate() {
+    for (i, atom) in atoms.iter().enumerate() {
         if i > 0 {
             out.push(',');
         }
@@ -128,6 +129,24 @@ fn format_effect_set(effects: &EffectSet, out: &mut String) {
         });
     }
     out.push('}');
+}
+
+fn canonical_effect_atoms(effects: &EffectSet) -> Vec<EffectAtom> {
+    let mut out = Vec::new();
+    for atom in [
+        EffectAtom::Io,
+        EffectAtom::Fs,
+        EffectAtom::Net,
+        EffectAtom::Proc,
+        EffectAtom::Rand,
+        EffectAtom::Time,
+        EffectAtom::St,
+    ] {
+        if effects.atoms.contains(&atom) {
+            out.push(atom);
+        }
+    }
+    out
 }
 
 fn format_function_type(sig: &FunctionType, out: &mut String) {
