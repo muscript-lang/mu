@@ -89,3 +89,52 @@ fn acceptance_rejects_noncanonical_effects_and_main_signature() {
     let _ = fs::remove_file(bad_effect);
     let _ = fs::remove_file(bad_main);
 }
+
+#[test]
+fn acceptance_examples_run_and_build_matrix() {
+    let exe = env!("CARGO_BIN_EXE_muc");
+    for example in ["examples/hello.mu", "examples/json.mu", "examples/http.mu"] {
+        let check = Command::new(exe)
+            .args(["check", example])
+            .output()
+            .expect("check should run");
+        assert!(
+            check.status.success(),
+            "check should pass for {example}: {}",
+            String::from_utf8_lossy(&check.stderr)
+        );
+
+        let run_src = Command::new(exe)
+            .args(["run", example])
+            .output()
+            .expect("run should execute source");
+        assert!(
+            run_src.status.success(),
+            "run should pass for {example}: {}",
+            String::from_utf8_lossy(&run_src.stderr)
+        );
+
+        let out = temp_mub("example_matrix");
+        let build = Command::new(exe)
+            .args(["build", example, "-o", out.to_str().expect("utf8 path")])
+            .output()
+            .expect("build should run");
+        assert!(
+            build.status.success(),
+            "build should pass for {example}: {}",
+            String::from_utf8_lossy(&build.stderr)
+        );
+
+        let run_mub = Command::new(exe)
+            .args(["run", out.to_str().expect("utf8 path")])
+            .output()
+            .expect("run should execute bytecode");
+        assert!(
+            run_mub.status.success(),
+            "run .mub should pass for {example}: {}",
+            String::from_utf8_lossy(&run_mub.stderr)
+        );
+
+        let _ = fs::remove_file(out);
+    }
+}
