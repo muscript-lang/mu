@@ -36,8 +36,44 @@ fn mu_dungeon_main_seed_1_result_line_is_stable() {
     let last = stdout.lines().last().unwrap_or("");
     assert_eq!(
         last,
-        "RESULT Lose room=6 turn=4 xp=50 hp=0 seed=978",
+        "RESULT Lose room=10 turn=7 xp=117 hp=-1 seed=941",
         "unexpected final line:\n{stdout}"
+    );
+}
+
+#[test]
+fn mu_dungeon_baseline_win_rate_is_in_target_band_for_100_seeds() {
+    let src = std::fs::read_to_string("apps/mu_dungeon/src/main.mu")
+        .expect("mu_dungeon source should be readable");
+    let mut wins = 0usize;
+
+    for seed in 1..=100 {
+        let seeded = src.replacen(
+            "F main:()->i32!{io}=v(seed:i32=1,",
+            &format!("F main:()->i32!{{io}}=v(seed:i32={seed},"),
+            1,
+        );
+        let tmp = std::env::temp_dir().join(format!("mu_dungeon_seed_{seed}.mu"));
+        std::fs::write(&tmp, seeded).expect("temp seeded file should be writable");
+
+        let out = run_muc(&["run", tmp.to_str().expect("temp path should be utf8")]);
+        let _ = std::fs::remove_file(&tmp);
+        assert!(
+            out.status.success(),
+            "seed {seed} run should pass: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let last = stdout.lines().last().unwrap_or("");
+        if last.starts_with("RESULT Win") {
+            wins += 1;
+        }
+    }
+
+    assert!(
+        (20..=40).contains(&wins),
+        "wins over 100 seeds should be in [20,40], got {wins}"
     );
 }
 
