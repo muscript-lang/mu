@@ -3,7 +3,7 @@
 ![CI](https://img.shields.io/badge/ci-fast%20checks-blue)
 ![Fuzz (manual)](https://img.shields.io/badge/fuzz-manual-orange)
 
-![µScript Sprite](res/usprite.png)
+<img src="res/usprite.png" alt="µScript Sprite" width="33%" />
 
 # Why µScript?
 µScript is not trying to be another general-purpose language.
