@@ -1,0 +1,6 @@
+seeds=100
+start=1
+policy=baseline
+class=Warrior
+all_classes=true
+all_policies=false
