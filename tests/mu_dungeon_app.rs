@@ -35,8 +35,7 @@ fn mu_dungeon_main_seed_1_result_line_is_stable() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     let last = stdout.lines().last().unwrap_or("");
     assert_eq!(
-        last,
-        "RESULT Lose room=10 turn=7 xp=117 hp=-1 seed=941",
+        last, "RESULT Lose room=10 turn=7 xp=117 hp=-1 seed=941",
         "unexpected final line:\n{stdout}"
     );
 }

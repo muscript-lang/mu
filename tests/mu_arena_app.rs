@@ -37,7 +37,10 @@ fn mu_arena_main_is_deterministic() {
     assert_eq!(s1, s2, "mu_arena output should be deterministic");
 
     let best = s1.lines().last().unwrap_or("");
-    assert!(best.starts_with("BEST policy="), "unexpected best line: {best}");
+    assert!(
+        best.starts_with("BEST policy="),
+        "unexpected best line: {best}"
+    );
 }
 
 #[test]
