@@ -3,6 +3,93 @@
 ![CI](https://img.shields.io/badge/ci-fast%20checks-blue)
 ![Fuzz (manual)](https://img.shields.io/badge/fuzz-manual-orange)
 
+
+# Why µScript?
+µScript is not trying to be another general-purpose language.
+It is something different:
+A deterministic, replayable, sandbox-friendly scripting language designed for LLM generation and controlled execution.
+## 🧠 Designed With LLMs in Mind
+Most programming languages were designed for humans first.
+µScript explores a different direction:
+Deterministic semantics
+Stable evaluation order
+Explicit effects
+Canonical formatting
+Token-efficient compressed representation
+It is intentionally structured in a way that large language models can generate, transform, and reason about reliably.
+## 🔒 Determinism as a First-Class Feature
+µScript programs:
+Behave identically across platforms
+Do not rely on undefined behavior
+Have frozen evaluation semantics
+Produce deterministic replayable output
+If you run the same program with the same inputs and seed, you get the same results.
+This makes µScript ideal for:
+Simulation engines
+Agent experiments
+Rule systems
+Reproducible research
+Deterministic game logic
+## 📦 Bytecode + VM Architecture
+µScript compiles to bytecode (.mub) and runs inside a VM.
+This provides:
+Sandboxed execution
+Portable artifacts
+Identical behavior on desktop and browser (via WebAssembly)
+Safe execution of generated code
+Introspection and replay
+The language is the VM.
+## 🗜 Compressed Canonical Mode
+µScript supports a unique compressed canonical format:
+Module-level symbol tables
+Indexed identifiers (#n)
+Bracket special forms
+S-expression calls
+Short effect atoms
+This results in:
+~30–40%+ byte reduction
+Significant token reduction
+Deterministic formatting
+Reversible transformation between readable and compressed forms
+The compressed representation is not a hack — it is a stable, first-class format.
+This makes µScript particularly efficient for:
+LLM-generated code
+Agent pipelines
+Embedded scripting payloads
+Network transmission
+## 🎮 Real Applications, Not Toy Examples
+µScript is already used in this repository to build:
+µDungeon — a deterministic 10-room roguelike combat simulator
+µArena — a batch tournament runner that evaluates strategies across 100+ seeds
+These are not trivial demos — they are deterministic simulation systems with reproducible results and measurable token savings.
+## 🎯 What µScript Is (And Isn’t)
+µScript is ideal for:
+Deterministic logic engines
+Agent scripting
+Simulation and replay systems
+Sandboxed execution
+Browser-embedded scripting via WASM
+µScript is not intended for:
+Heavy numeric computing
+Systems programming
+Large data processing pipelines
+Replacing Python or Rust
+It fills a specific niche:
+A deterministic scripting DSL optimized for LLM generation and controlled execution.
+## 🚀 The Big Idea
+Most languages optimize for:
+Human ergonomics
+Runtime performance
+Ecosystem size
+µScript optimizes for:
+Determinism
+Replayability
+Safety
+Canonical structure
+Token economy
+It explores what programming looks like when LLMs are first-class participants in the development loop.
+If you want to build deterministic simulations, sandboxed agents, or reproducible logic systems — and care about token efficiency — µScript might be exactly the tool you didn’t know you needed.
+
 `muc` is the reference µScript v0.2 toolchain in Rust.
 It includes:
 - Lexer + parser for the EBNF grammar
