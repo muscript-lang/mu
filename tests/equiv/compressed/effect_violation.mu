@@ -1,1 +1,1 @@
-@eq.bad{$[main,print];F #0:()->i32={(#1 "x");0};}
+@eq.bad{$[];F main:()->i32={(print "x");0};}

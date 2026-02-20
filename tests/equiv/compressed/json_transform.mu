@@ -1,1 +1,1 @@
-@eq.json{$[Arr,Bool,Er,Json,Null,Num,Obj,Ok,Str,e,io,j,main,parse,println,stringify];:#10=core.io;T #3=#4|#1(b)|#5(f64)|#8(s)|#0(#3[])|#6({s:#3});F #12:()->i32!{I}=[m (#13 "{\"mu\":1}") {#7(#11) {(#14 (#15 #11));0}} {#2(#9) {(#14 #9);1}}];}
+@eq.json{$[Json];:io=core.io;T #0=Null|Bool(b)|Num(f64)|Str(s)|Arr(#0[])|Obj({s:#0});F main:()->i32!{I}=[m (parse "{\"mu\":1}") {Ok(j) {(println (stringify j));0}} {Er(e) {(println e);1}}];}
