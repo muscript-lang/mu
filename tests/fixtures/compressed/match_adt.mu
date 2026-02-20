@@ -1,1 +1,1 @@
-@eq.match{$[No,Opt,Yes,main,x];T #1=#0|#2(i32);F #3:()->i32=[m #2(7) {#2(#4) #4} {#0 0}];}
+@eq.match{$[];T Opt=No|Yes(i32);F main:()->i32=[m Yes(7) {Yes(x) x} {No 0}];}
