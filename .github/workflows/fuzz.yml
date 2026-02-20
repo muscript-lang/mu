@@ -3,12 +3,15 @@ name: fuzz
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   fuzz-smoke:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@0f1b44df7e9cbb178d781a242338dfa5e243ad7f
       - name: install cargo-fuzz
         run: cargo install cargo-fuzz
       - name: fuzz lexer
