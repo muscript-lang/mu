@@ -207,7 +207,8 @@ fn run_impl(src: &str, fuel: u64, stdin: Option<String>) -> RunResponse {
     let mut host = WebHost::new(stdin, MAX_OUTPUT_BYTES);
     let fuel_limit = if fuel == 0 { 1 } else { fuel };
     let result = vm::run_bytecode_with_fuel_and_host(&bytecode, &[], fuel_limit, &mut host);
-    let fuel_used = vm::last_fuel_used();
+    // The current VM API does not expose consumed fuel; keep this field stable.
+    let fuel_used = 0;
 
     match result {
         Ok(()) => RunResponse {
