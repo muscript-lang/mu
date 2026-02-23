@@ -99,17 +99,26 @@ impl VmHost for RealHost {
     }
 
     fn http_get(&mut self, url: &str) -> Result<String, String> {
-        match ureq::get(url).call() {
-            Ok(mut response) => {
-                let mut body = String::new();
-                response
-                    .body_mut()
-                    .as_reader()
-                    .read_to_string(&mut body)
-                    .map_err(|e| format!("get body read failed: {e}"))?;
-                Ok(body)
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            match ureq::get(url).call() {
+                Ok(mut response) => {
+                    let mut body = String::new();
+                    response
+                        .body_mut()
+                        .as_reader()
+                        .read_to_string(&mut body)
+                        .map_err(|e| format!("get body read failed: {e}"))?;
+                    Ok(body)
+                }
+                Err(e) => Err(format!("get failed: {e}")),
             }
-            Err(e) => Err(format!("get failed: {e}")),
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = url;
+            Err("http get disabled on wasm host".to_string())
         }
     }
 }
