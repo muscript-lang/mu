@@ -23,12 +23,12 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@f72b527f02f6081c2db4065f63ad7db7d40e2f65
+        uses: github/codeql-action/init@v4
         with:
           languages: rust
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@f72b527f02f6081c2db4065f63ad7db7d40e2f65
+        uses: github/codeql-action/autobuild@v4
 
       - name: Analyze
-        uses: github/codeql-action/analyze@f72b527f02f6081c2db4065f63ad7db7d40e2f65
+        uses: github/codeql-action/analyze@v4
