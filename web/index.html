@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>muScript Playground</title>
+    
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero">
+        <h1>muScript Playground</h1>
+        <p>Browser-only, deterministic sandbox with io-only effects.</p>
+      </header>
+
+      <section class="controls">
+        <label>
+          Demo
+          <select id="demo-select"></select>
+        </label>
+        <label>
+          Fuel <span id="fuel-value">500000</span>
+          <input id="fuel" type="range" min="1000" max="10000000" step="1000" value="500000" />
+        </label>
+        <label>
+          stdin
+          <textarea id="stdin" rows="3" placeholder="Optional stdin for readln()"></textarea>
+        </label>
+      </section>
+
+      <section class="actions">
+        <button id="fmt-readable">Format Readable</button>
+        <button id="fmt-compressed">Format Compressed</button>
+        <button id="check">Check</button>
+        <button id="run">Run</button>
+      </section>
+      <section class="status">
+        <strong>Status:</strong> <span id="status">Initializing WASM...</span>
+      </section>
+
+      <section class="editors">
+        <div>
+          <h2>Source</h2>
+          <textarea id="source" spellcheck="false"></textarea>
+        </div>
+        <div>
+          <h2>Formatted Output</h2>
+          <textarea id="formatted" spellcheck="false" readonly></textarea>
+        </div>
+      </section>
+
+      <section class="stats" id="stats"></section>
+
+      <section class="output">
+        <h2>Run Output</h2>
+        <pre id="stdout"></pre>
+        <h2>Diagnostics</h2>
+        <pre id="stderr"></pre>
+      </section>
+    </main>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

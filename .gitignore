@@ -1,3 +1,6 @@
 /target
 /fuzz/artifacts
 /fuzz/corpus
+/web/node_modules
+/web/pkg
+/web/dist
